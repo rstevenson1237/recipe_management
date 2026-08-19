@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #1e293b; background: #f1f5f9; }
+
+    .toolbar {
+      position: sticky; top: 0; z-index: 10;
+      background: #1e293b; color: #fff;
+      padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;
+    }
+    .toolbar button {
+      background: #2563eb; color: #fff; border: none; padding: 8px 16px;
+      border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;
+    }
+    .toolbar button:hover { background: #1d4ed8; }
+
+    .empty-state { padding: 60px 20px; text-align: center; color: #64748b; }
+
+    .recipe-page {
+      position: relative;
+      background: #fff;
+      padding: 28px 32px 56px;
+      min-height: 550px;
+    }
+    .recipe-header { border-bottom: 2px solid #1e293b; padding-bottom: 10px; margin-bottom: 16px; }
+    .recipe-header h2 { margin: 0 0 8px; font-size: 22px; }
+    .meta-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 4px 20px; font-size: 12px; color: #334155;
+    }
+    .meta-grid strong { color: #0f172a; }
+
+    .body-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 28px; margin-top: 12px; }
+    .ingredients-col h3, .instructions-col h3 {
+      font-size: 13px; text-transform: uppercase; letter-spacing: .05em;
+      border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin: 0 0 8px;
+    }
+    .ingredients-col ul { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+    .ingredients-col li { padding: 4px 0; border-bottom: 1px dashed #e2e8f0; }
+    .instructions-col ol { padding-left: 20px; margin: 0; font-size: 13px; }
+    .instructions-col li { padding: 6px 0; white-space: pre-wrap; }
+
+    .logo { position: absolute; left: 32px; bottom: 16px; height: 24px; }
+
+    @media screen {
+      .recipe-page { max-width: 900px; margin: 20px auto; box-shadow: 0 1px 4px rgba(0,0,0,.15); border-radius: 6px; }
+    }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none; }
+      .recipe-page { page-break-after: always; }
+      .recipe-page:last-child { page-break-after: auto; }
+      @page { size: letter; margin: 0.5in; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="toolbar">
+  <span>Recipe Export Preview<? if (recipes.length) { ?> &mdash; <?= recipes.length ?> recipe(s)<? } ?></span>
+  <button onclick="window.print()">🖨️ Print / Save as PDF</button>
+</div>
+
+<? if (!recipes.length) { ?>
+  <div class="empty-state">No recipes on file yet.</div>
+<? } else { ?>
+  <? for (var i = 0; i < recipes.length; i++) { ?>
+    <? var r = recipes[i]; ?>
+    <div class="recipe-page">
+      <div class="recipe-header">
+        <h2><?= r.name ?></h2>
+        <div class="meta-grid">
+          <div><strong>Measure Type:</strong> <?= r.measureType ?></div>
+          <div><strong>Yield:</strong> <?= r.yieldQty ?> <?= r.yieldUom ?></div>
+          <div><strong>Reporting U of M:</strong> <?= r.reportingUom ?></div>
+          <div><strong>Portion:</strong> <?= r.portionSize ?> <?= r.portionUom ?></div>
+          <div><strong>In Inventory:</strong> <?= r.availableInInventory ?></div>
+          <? if (r.availableInInventory === 'Yes') { ?>
+            <div><strong>Inventory U of M:</strong> <?= r.inventoryUom ?></div>
+          <? } ?>
+        </div>
+      </div>
+
+      <div class="body-grid">
+        <div class="ingredients-col">
+          <h3>Ingredients</h3>
+          <ul>
+            <? if (!r.ingredients.length) { ?>
+              <li><em>No ingredients on file.</em></li>
+            <? } ?>
+            <? for (var ii = 0; ii < r.ingredients.length; ii++) { ?>
+              <? var ing = r.ingredients[ii]; ?>
+              <li><?= ing.qty ?> <?= ing.uom ?> &mdash; <?= ing.name ?></li>
+            <? } ?>
+          </ul>
+        </div>
+        <div class="instructions-col">
+          <h3>Instructions</h3>
+          <ol>
+            <? if (!r.steps.length) { ?>
+              <li><em>No instructions on file.</em></li>
+            <? } ?>
+            <? for (var si = 0; si < r.steps.length; si++) { ?>
+              <li><?= r.steps[si] ?></li>
+            <? } ?>
+          </ol>
+        </div>
+      </div>
+
+      <img class="logo" src="<?!= logoDataUri ?>" alt="logo">
+    </div>
+  <? } ?>
+<? } ?>
+
+</body>
+</html>
