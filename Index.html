@@ -2,9 +2,11 @@
 <html>
 <head>
   <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
+    html, body { height: 100%; margin: 0; }
     [data-title]:hover::after {
       content: attr(data-title);
       position: absolute;
@@ -22,170 +24,287 @@
       margin-bottom: 5px;
     }
     .tooltip-container { position: relative; display: inline-block; }
+    .field-error { border-color: #dc2626 !important; background-color: #fef2f2; }
+    .drag-over { outline: 2px dashed #f97316; outline-offset: 2px; }
   </style>
 </head>
-<body class="bg-gray-100 p-6">
+<body class="bg-gray-100">
 
-<div id="app" class="max-w-4xl mx-auto bg-white rounded-xl shadow-lg p-8 mb-20">
-  <h1 class="text-3xl font-bold text-gray-800 mb-8 border-b pb-4">Create New Recipe</h1>
+<div id="app" class="h-screen flex flex-col">
 
-  <!-- SECTIONS 1-4 (Headers, Yield, Portion/Inventory, Accounting) remain identical -->
-  <!-- SECTION 1 -->
-  <div class="mb-6">
-    <div class="bg-blue-600 text-white px-4 py-2 rounded-t-lg font-bold">1. Recipe Identification</div>
-    <div class="border border-blue-600 p-4 rounded-b-lg grid grid-cols-2 gap-6 bg-blue-50">
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1 tooltip-container" data-title="The name used to refer to the recipe for prep and menu use">Recipe Name ⓘ</label>
-        <input type="text" v-model="form.name" class="w-full border-gray-300 rounded-md shadow-sm p-2 border">
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1 tooltip-container" data-title="Select Weight, Volume or Count. This determines the yield constraints.">Measure Type ⓘ</label>
-        <select v-model="form.measureType" class="w-full border-gray-300 rounded-md shadow-sm p-2 border">
-          <option value="" disabled>Select Type...</option>
-          <option value="Weight">Weight</option>
-          <option value="Volume">Volume</option>
-          <option value="Count">Count</option>
-        </select>
-      </div>
-    </div>
+  <!-- Loading / error states -->
+  <div v-if="loadingHelperData" class="flex-1 flex items-center justify-center text-gray-500">
+    Loading recipe data...
+  </div>
+  <div v-else-if="helperDataError" class="flex-1 flex flex-col items-center justify-center text-center gap-3 p-8">
+    <p class="text-red-600 font-medium">{{ helperDataError }}</p>
+    <button @click="loadHelperData" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Retry</button>
   </div>
 
-  <!-- SECTION 2 -->
-  <div class="mb-6">
-    <div class="bg-green-600 text-white px-4 py-2 rounded-t-lg font-bold">2. Yield Output</div>
-    <div class="border border-green-600 p-4 rounded-b-lg grid grid-cols-2 gap-6 bg-green-50">
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1 tooltip-container" data-title="The total yielded amount or number of servings the recipe produces.">Yield Qty ⓘ</label>
-        <input type="number" v-model="form.yieldQty" class="w-full border-gray-300 rounded-md shadow-sm p-2 border">
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1 tooltip-container" data-title="Constrained by Measure Type.">Yield U of M ⓘ</label>
-        <select v-model="form.yieldUom" :disabled="!form.measureType" class="w-full border-gray-300 rounded-md shadow-sm p-2 border disabled:bg-gray-200">
-          <option value="" disabled>Select Yield UOM...</option>
-          <option v-for="uom in availableYieldUoms" :key="uom" :value="uom">{{ uom }}</option>
-        </select>
-      </div>
-    </div>
-  </div>
+  <!-- Main form -->
+  <template v-else>
+    <div class="flex-1 overflow-y-auto p-4 sm:p-6">
+      <div class="max-w-5xl mx-auto bg-white rounded-xl shadow-lg p-4 sm:p-8">
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">Create New Recipe</h1>
 
-  <!-- SECTION 3 -->
-  <div class="mb-6">
-    <div class="bg-purple-600 text-white px-4 py-2 rounded-t-lg font-bold">3. Portion & Usage</div>
-    <div class="border border-purple-600 p-4 rounded-b-lg bg-purple-50">
-      <div class="grid grid-cols-4 gap-4 mb-4">
-        <div><label class="block text-sm font-medium text-gray-700 mb-1">Portion Size</label><input type="number" v-model="form.portionSize" class="w-full border-gray-300 rounded-md shadow-sm p-2 border"></div>
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Portion U of M</label>
-          <select v-model="form.portionUom" class="w-full border-gray-300 rounded-md shadow-sm p-2 border">
-            <option value=""></option>
-            <optgroup label="Weight"><option v-for="uom in uomData.Weight">{{uom}}</option></optgroup>
-            <optgroup label="Volume"><option v-for="uom in uomData.Volume">{{uom}}</option></optgroup>
-            <optgroup label="Count"><option v-for="uom in uomData.Count">{{uom}}</option></optgroup>
-          </select>
+        <!-- SECTION 1: IDENTIFICATION -->
+        <div class="mb-6">
+          <div class="bg-blue-600 text-white px-4 py-2 rounded-t-lg font-bold">1. Recipe Identification</div>
+          <div class="border border-blue-600 p-4 rounded-b-lg grid grid-cols-1 sm:grid-cols-2 gap-6 bg-blue-50">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1 tooltip-container" data-title="The name used to refer to the recipe for prep and menu use">Recipe Name ⓘ</label>
+              <input type="text" v-model="form.name" @input="touch('name')" @blur="touch('name')"
+                     class="w-full border-gray-300 rounded-md shadow-sm p-2 border" :class="{'field-error': fieldError('name')}">
+              <p v-if="fieldError('name')" class="text-xs text-red-600 mt-1">{{ fieldError('name') }}</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1 tooltip-container" data-title="Select Weight, Volume or Each. This determines the yield constraints.">Measure Type ⓘ</label>
+              <select v-model="form.measureType" @change="touch('measureType')"
+                      class="w-full border-gray-300 rounded-md shadow-sm p-2 border" :class="{'field-error': fieldError('measureType')}">
+                <option value="" disabled>Select Type...</option>
+                <option value="Weight">Weight</option>
+                <option value="Volume">Volume</option>
+                <option value="Each">Each</option>
+              </select>
+              <p v-if="fieldError('measureType')" class="text-xs text-red-600 mt-1">{{ fieldError('measureType') }}</p>
+            </div>
+          </div>
         </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">In Inventory?</label>
-          <select v-model="form.inventoryYesNo" class="w-full border-gray-300 rounded-md shadow-sm p-2 border">
-            <option value="Yes">Yes</option><option value="No">No</option>
-          </select>
+
+        <!-- SECTION 2: YIELD OUTPUT -->
+        <div class="mb-6">
+          <div class="bg-green-600 text-white px-4 py-2 rounded-t-lg font-bold">2. Yield Output</div>
+          <div class="border border-green-600 p-4 rounded-b-lg grid grid-cols-1 sm:grid-cols-3 gap-6 bg-green-50">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1 tooltip-container" data-title="The total yielded amount or number of servings the recipe produces.">Yield Qty ⓘ</label>
+              <input type="number" v-model="form.yieldQty" @input="touch('yieldQty')" @blur="touch('yieldQty')"
+                     class="w-full border-gray-300 rounded-md shadow-sm p-2 border" :class="{'field-error': fieldError('yieldQty')}">
+              <p v-if="fieldError('yieldQty')" class="text-xs text-red-600 mt-1">{{ fieldError('yieldQty') }}</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1 tooltip-container" data-title="Constrained by Measure Type.">Yield U of M ⓘ</label>
+              <select v-model="form.yieldUom" @change="touch('yieldUom')" :disabled="!form.measureType"
+                      class="w-full border-gray-300 rounded-md shadow-sm p-2 border disabled:bg-gray-200" :class="{'field-error': fieldError('yieldUom')}">
+                <option value="" disabled>Select Yield UOM...</option>
+                <option v-for="uom in availableYieldUoms" :key="uom" :value="uom">{{ uom }}</option>
+              </select>
+              <p v-if="fieldError('yieldUom')" class="text-xs text-red-600 mt-1">{{ fieldError('yieldUom') }}</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1 tooltip-container" data-title="The unit this recipe is reported/costed in. Defaults to the Yield U of M.">Reporting U of M ⓘ</label>
+              <select v-model="form.reportingUom" @change="touch('reportingUom')" :disabled="!form.measureType"
+                      class="w-full border-gray-300 rounded-md shadow-sm p-2 border disabled:bg-gray-200" :class="{'field-error': fieldError('reportingUom')}">
+                <option value="" disabled>Select Reporting UOM...</option>
+                <option v-for="uom in availableYieldUoms" :key="uom" :value="uom">{{ uom }}</option>
+              </select>
+              <p v-if="fieldError('reportingUom')" class="text-xs text-red-600 mt-1">{{ fieldError('reportingUom') }}</p>
+            </div>
+          </div>
         </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Inventory U of M</label>
-          <select v-model="form.inventoryUom" :disabled="form.inventoryYesNo === 'No'" class="w-full border-gray-300 rounded-md shadow-sm p-2 border disabled:bg-gray-200">
-            <option value=""></option>
-            <optgroup label="Weight"><option v-for="uom in uomData.Weight">{{uom}}</option></optgroup>
-            <optgroup label="Volume"><option v-for="uom in uomData.Volume">{{uom}}</option></optgroup>
-            <optgroup label="Count"><option v-for="uom in uomData.Count">{{uom}}</option></optgroup>
-          </select>
+
+        <!-- SECTION 3: PORTION & USAGE -->
+        <div class="mb-6">
+          <div class="bg-purple-600 text-white px-4 py-2 rounded-t-lg font-bold">3. Portion &amp; Usage</div>
+          <div class="border border-purple-600 p-4 rounded-b-lg bg-purple-50">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Portion Size</label>
+                <input type="number" v-model="form.portionSize" @input="touch('portionSize')" @blur="touch('portionSize')"
+                       class="w-full border-gray-300 rounded-md shadow-sm p-2 border">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Portion U of M</label>
+                <select v-model="form.portionUom" @change="touch('portionUom')"
+                        class="w-full border-gray-300 rounded-md shadow-sm p-2 border" :class="{'field-error': fieldError('portionUom')}">
+                  <option value=""></option>
+                  <optgroup label="Weight"><option v-for="uom in uomData.Weight" :key="uom">{{ uom }}</option></optgroup>
+                  <optgroup label="Volume"><option v-for="uom in uomData.Volume" :key="uom">{{ uom }}</option></optgroup>
+                  <optgroup label="Each"><option v-for="uom in uomData.Each" :key="uom">{{ uom }}</option></optgroup>
+                </select>
+                <p v-if="fieldError('portionUom')" class="text-xs text-red-600 mt-1">{{ fieldError('portionUom') }}</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">In Inventory?</label>
+                <select v-model="form.inventoryYesNo" @change="touch('inventoryYesNo')"
+                        class="w-full border-gray-300 rounded-md shadow-sm p-2 border">
+                  <option value="Yes">Yes</option><option value="No">No</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Inventory U of M</label>
+                <select v-model="form.inventoryUom" @change="touch('inventoryUom')" :disabled="form.inventoryYesNo === 'No'"
+                        class="w-full border-gray-300 rounded-md shadow-sm p-2 border disabled:bg-gray-200" :class="{'field-error': fieldError('inventoryUom')}">
+                  <option value=""></option>
+                  <optgroup label="Weight"><option v-for="uom in uomData.Weight" :key="uom">{{ uom }}</option></optgroup>
+                  <optgroup label="Volume"><option v-for="uom in uomData.Volume" :key="uom">{{ uom }}</option></optgroup>
+                  <optgroup label="Each"><option v-for="uom in uomData.Each" :key="uom">{{ uom }}</option></optgroup>
+                </select>
+                <p v-if="fieldError('inventoryUom')" class="text-xs text-red-600 mt-1">{{ fieldError('inventoryUom') }}</p>
+              </div>
+            </div>
+
+            <!-- Equivalency Block -->
+            <div v-if="needsEquivalency" class="bg-yellow-100 border-l-4 border-yellow-500 p-4 mt-4 rounded">
+              <h3 class="font-bold text-yellow-800 mb-2">⚠️ Equivalency Required</h3>
+              <p class="text-sm text-yellow-700 mb-4">Please define how the different measurement types convert to each other.</p>
+              <div class="flex flex-wrap items-center gap-4">
+                <template v-if="requiredEquivCategories.includes('Weight')">
+                  <div>
+                    <div class="flex space-x-2">
+                      <input type="number" v-model="form.weightQty" @input="touch('weightEquivalency')" placeholder="Qty" class="w-20 p-2 border rounded" :class="{'field-error': fieldError('weightEquivalency')}">
+                      <select v-model="form.weightUom" @change="touch('weightEquivalency')" class="p-2 border rounded" :class="{'field-error': fieldError('weightEquivalency')}">
+                        <option value=""></option>
+                        <option v-for="uom in uomData.Weight" :key="uom">{{ uom }}</option>
+                      </select>
+                    </div>
+                  </div>
+                </template>
+                <span v-if="requiredEquivCategories.length > 1" class="font-bold text-gray-500">=</span>
+                <template v-if="requiredEquivCategories.includes('Volume')">
+                  <div>
+                    <div class="flex space-x-2">
+                      <input type="number" v-model="form.volumeQty" @input="touch('volumeEquivalency')" placeholder="Qty" class="w-20 p-2 border rounded" :class="{'field-error': fieldError('volumeEquivalency')}">
+                      <select v-model="form.volumeUom" @change="touch('volumeEquivalency')" class="p-2 border rounded" :class="{'field-error': fieldError('volumeEquivalency')}">
+                        <option value=""></option>
+                        <option v-for="uom in uomData.Volume" :key="uom">{{ uom }}</option>
+                      </select>
+                    </div>
+                  </div>
+                </template>
+                <span v-if="requiredEquivCategories.includes('Each') && requiredEquivCategories.length > 1" class="font-bold text-gray-500">=</span>
+                <template v-if="requiredEquivCategories.includes('Each')">
+                  <div>
+                    <div class="flex space-x-2">
+                      <input type="number" v-model="form.eachQty" @input="touch('eachEquivalency')" placeholder="Qty" class="w-20 p-2 border rounded" :class="{'field-error': fieldError('eachEquivalency')}">
+                      <select v-model="form.eachUom" @change="touch('eachEquivalency')" class="p-2 border rounded" :class="{'field-error': fieldError('eachEquivalency')}">
+                        <option value=""></option>
+                        <option v-for="uom in uomData.Each" :key="uom">{{ uom }}</option>
+                      </select>
+                    </div>
+                  </div>
+                </template>
+              </div>
+              <p v-if="fieldError('weightEquivalency') || fieldError('volumeEquivalency') || fieldError('eachEquivalency')" class="text-xs text-red-700 mt-2">
+                {{ fieldError('weightEquivalency') || fieldError('volumeEquivalency') || fieldError('eachEquivalency') }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- SECTION 4: INGREDIENTS & BULK PASTE -->
+        <div class="mb-6">
+          <div class="flex justify-between items-end bg-orange-600 text-white px-4 py-2 rounded-t-lg font-bold">
+            <span>4. Ingredients List</span>
+            <button @click="showBulk = !showBulk" class="text-xs bg-orange-800 hover:bg-orange-900 px-3 py-1 rounded">
+              {{ showBulk ? 'Hide Bulk Paste' : 'Use Bulk Paste' }}
+            </button>
+          </div>
+          <div class="border border-orange-600 p-4 rounded-b-lg bg-orange-50">
+
+            <!-- Bulk Paste Tool -->
+            <div v-if="showBulk" class="mb-6 bg-white p-4 border border-orange-300 rounded shadow-inner">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Bulk Paste from Excel (Ingredient | Qty | UOM)</label>
+              <textarea v-model="bulkText" rows="4" class="w-full border-gray-300 rounded-md shadow-sm p-2 border font-mono text-sm mb-2" placeholder="Paste your Excel grid here..."></textarea>
+              <button @click="parseBulkData" class="bg-gray-800 text-white px-4 py-2 rounded hover:bg-gray-700">Parse Data</button>
+              <p class="text-xs text-gray-500 mt-2">Rows that don't match Helper Data will be added and flagged in red for you to fix.</p>
+            </div>
+
+            <datalist id="ingredient-items-list">
+              <option v-for="item in items" :key="item" :value="item"></option>
+            </datalist>
+
+            <!-- Ingredient Rows -->
+            <div class="overflow-x-auto">
+              <table class="w-full text-left bg-white border min-w-[500px]">
+                <thead>
+                  <tr class="bg-gray-100 border-b">
+                    <th class="p-2 font-medium text-sm">Ingredient Name</th>
+                    <th class="p-2 font-medium text-sm w-24">Qty</th>
+                    <th class="p-2 font-medium text-sm w-40">U of M</th>
+                    <th class="p-2 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(ing, index) in ingredients" :key="index" class="border-b align-top">
+                    <td class="p-2">
+                      <input type="text" v-model="ing.name" @input="hasInteracted = true" list="ingredient-items-list"
+                             class="w-full border p-1 rounded" :class="{'field-error': ingredientRowErrors[index].name}">
+                      <p v-if="ingredientRowErrors[index].name" class="text-xs text-red-600 mt-1">Not in Helper Data</p>
+                    </td>
+                    <td class="p-2">
+                      <input type="number" v-model="ing.qty" @input="hasInteracted = true"
+                             class="w-full border p-1 rounded" :class="{'field-error': ingredientRowErrors[index].qty}">
+                    </td>
+                    <td class="p-2">
+                      <select v-model="ing.uom" @change="hasInteracted = true"
+                              class="w-full border p-1 rounded" :class="{'field-error': ingredientRowErrors[index].uom}">
+                        <option value=""></option>
+                        <optgroup label="Weight"><option v-for="uom in uomData.Weight" :key="uom">{{ uom }}</option></optgroup>
+                        <optgroup label="Volume"><option v-for="uom in uomData.Volume" :key="uom">{{ uom }}</option></optgroup>
+                        <optgroup label="Each"><option v-for="uom in uomData.Each" :key="uom">{{ uom }}</option></optgroup>
+                      </select>
+                    </td>
+                    <td class="p-2 text-center">
+                      <button @click="removeIngredient(index)" class="text-red-500 hover:text-red-700 font-bold">✕</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <button @click="addIngredient" class="mt-4 text-blue-600 hover:text-blue-800 font-medium text-sm">+ Add Row</button>
+            <p v-if="fieldError('ingredients')" class="text-xs text-red-600 mt-2">{{ fieldError('ingredients') }}</p>
+          </div>
+        </div>
+
+        <!-- SECTION 5: INSTRUCTIONS -->
+        <div class="mb-6">
+          <div class="bg-teal-600 text-white px-4 py-2 rounded-t-lg font-bold">5. Instructions</div>
+          <div class="border border-teal-600 p-4 rounded-b-lg bg-teal-50">
+            <p class="text-xs text-gray-500 mb-3">Drag the ⠿ handle to reorder steps.</p>
+            <div
+              v-for="(step, index) in instructions" :key="step.uid"
+              draggable="true"
+              @dragstart="onDragStart(index, $event)"
+              @dragover.prevent="onDragOver(index)"
+              @drop.prevent="onDrop(index)"
+              @dragend="onDragEnd"
+              class="flex items-start gap-2 mb-2 bg-white border rounded p-2"
+              :class="{'opacity-40': draggingIndex === index, 'drag-over': dragOverIndex === index && draggingIndex !== index}"
+            >
+              <span class="cursor-move text-gray-400 mt-2 select-none" title="Drag to reorder">⠿</span>
+              <span class="font-bold text-gray-500 mt-2 w-6 text-right shrink-0">{{ index + 1 }}.</span>
+              <textarea v-model="step.text" @input="hasInteracted = true" rows="2"
+                        class="flex-1 border rounded p-2 text-sm" placeholder="Describe this step..."></textarea>
+              <button @click="removeInstruction(index)" class="text-red-500 hover:text-red-700 font-bold mt-2">✕</button>
+            </div>
+
+            <button @click="addInstruction" class="mt-2 text-blue-600 hover:text-blue-800 font-medium text-sm">+ Add Step</button>
+            <p v-if="fieldError('instructions')" class="text-xs text-red-600 mt-2">{{ fieldError('instructions') }}</p>
+          </div>
         </div>
       </div>
-      
-      <!-- Equivalency Block -->
-      <div v-if="needsEquivalency" class="bg-yellow-100 border-l-4 border-yellow-500 p-4 mt-4 rounded">
-        <h3 class="font-bold text-yellow-800 mb-2">⚠️ Equivalency Required</h3>
-        <p class="text-sm text-yellow-700 mb-4">Please define how the different measurement types convert to each other.</p>
-        <div class="flex items-center space-x-4">
-          <template v-if="requiredEquivCategories.includes('Weight')">
-            <div class="flex space-x-2"><input type="number" v-model="form.weightQty" placeholder="Qty" class="w-20 p-2 border rounded"><select v-model="form.weightUom" class="p-2 border rounded"><option v-for="uom in uomData.Weight">{{uom}}</option></select></div>
-          </template>
-          <span v-if="requiredEquivCategories.length > 1" class="font-bold text-gray-500">=</span>
-          <template v-if="requiredEquivCategories.includes('Volume')">
-             <div class="flex space-x-2"><input type="number" v-model="form.volumeQty" placeholder="Qty" class="w-20 p-2 border rounded"><select v-model="form.volumeUom" class="p-2 border rounded"><option v-for="uom in uomData.Volume">{{uom}}</option></select></div>
-          </template>
-          <span v-if="requiredEquivCategories.includes('Count') && requiredEquivCategories.length > 1" class="font-bold text-gray-500">=</span>
-          <template v-if="requiredEquivCategories.includes('Count')">
-             <div class="flex space-x-2"><input type="number" v-model="form.eachQty" placeholder="Qty" class="w-20 p-2 border rounded"><select v-model="form.eachUom" class="p-2 border rounded"><option v-for="uom in uomData.Count">{{uom}}</option></select></div>
-          </template>
+    </div>
+
+    <!-- STICKY FOOTER: ERROR SUMMARY + SAVE -->
+    <div class="border-t bg-white p-4 sm:p-6 shadow-inner">
+      <div class="max-w-5xl mx-auto">
+        <div v-if="errorMessages.length" class="mb-3 bg-red-50 border border-red-300 rounded p-3">
+          <p class="text-sm font-bold text-red-700 mb-1">{{ errorMessages.length }} item(s) need attention:</p>
+          <ul class="text-xs text-red-600 list-disc list-inside">
+            <li v-for="msg in errorMessages" :key="msg">{{ msg }}</li>
+          </ul>
         </div>
+        <div v-if="serverMessage" class="mb-3 bg-red-50 border border-red-300 rounded p-3 text-sm text-red-700">
+          {{ serverMessage }}
+        </div>
+        <button @click="saveData" :disabled="isSaving || !isValid"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-lg text-lg shadow-md transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">
+          {{ isSaving ? 'Saving...' : '💾 Save Recipe to Database' }}
+        </button>
       </div>
     </div>
-  </div>
-
-  <!-- SECTION 4 -->
-  <div class="mb-6">
-    <div class="bg-gray-700 text-white px-4 py-2 rounded-t-lg font-bold">4. Accounting</div>
-    <div class="border border-gray-700 p-4 rounded-b-lg grid grid-cols-3 gap-4 bg-gray-50">
-      <div><label class="block text-sm font-medium text-gray-700 mb-1">Cost Update Method</label><select v-model="form.costMethod" class="w-full border-gray-300 rounded-md p-2 border"><option value="Nightly">Nightly</option><option value="Manual">Manual</option></select></div>
-      <div><label class="block text-sm font-medium text-gray-700 mb-1">Item Category 1</label><input type="text" v-model="form.cat1" class="w-full border-gray-300 rounded-md p-2 border"></div>
-      <div><label class="block text-sm font-medium text-gray-700 mb-1">Item Category 2</label><input type="text" v-model="form.cat2" class="w-full border-gray-300 rounded-md p-2 border"></div>
-      <div><label class="block text-sm font-medium text-gray-700 mb-1">Cost Account</label><input type="text" v-model="form.costAcct" class="w-full border-gray-300 rounded-md p-2 border"></div>
-      <div><label class="block text-sm font-medium text-gray-700 mb-1">Inventory Account</label><input type="text" v-model="form.invAcct" class="w-full border-gray-300 rounded-md p-2 border"></div>
-      <div><label class="block text-sm font-medium text-gray-700 mb-1">Waste Account</label><input type="text" v-model="form.wasteAcct" class="w-full border-gray-300 rounded-md p-2 border"></div>
-    </div>
-  </div>
-
-  <!-- ========================================== -->
-  <!-- SECTION 5: INGREDIENTS & BULK PASTE        -->
-  <!-- ========================================== -->
-  <div class="mb-8">
-    <div class="flex justify-between items-end bg-orange-600 text-white px-4 py-2 rounded-t-lg font-bold">
-      <span>5. Ingredients List</span>
-      <button @click="showBulk = !showBulk" class="text-xs bg-orange-800 hover:bg-orange-900 px-3 py-1 rounded">
-        {{ showBulk ? 'Hide Bulk Paste' : 'Use Bulk Paste' }}
-      </button>
-    </div>
-    <div class="border border-orange-600 p-4 rounded-b-lg bg-orange-50">
-      
-      <!-- Bulk Paste Tool -->
-      <div v-if="showBulk" class="mb-6 bg-white p-4 border border-orange-300 rounded shadow-inner">
-        <label class="block text-sm font-medium text-gray-700 mb-2">Bulk Paste from Excel (Ingredient | Qty | UOM | Yield %)</label>
-        <textarea v-model="bulkText" rows="4" class="w-full border-gray-300 rounded-md shadow-sm p-2 border font-mono text-sm mb-2" placeholder="Paste your Excel grid here..."></textarea>
-        <button @click="parseBulkData" class="bg-gray-800 text-white px-4 py-2 rounded hover:bg-gray-700">Parse Data</button>
-      </div>
-
-      <!-- Ingredient Rows -->
-      <table class="w-full text-left bg-white border">
-        <thead>
-          <tr class="bg-gray-100 border-b">
-            <th class="p-2 font-medium text-sm">Ingredient Name</th>
-            <th class="p-2 font-medium text-sm w-24">Qty</th>
-            <th class="p-2 font-medium text-sm w-32">U of M</th>
-            <th class="p-2 font-medium text-sm w-24">Yield %</th>
-            <th class="p-2 w-10"></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(ing, index) in ingredients" :key="index" class="border-b">
-            <td class="p-2"><input type="text" v-model="ing.name" class="w-full border p-1 rounded"></td>
-            <td class="p-2"><input type="number" v-model="ing.qty" class="w-full border p-1 rounded"></td>
-            <td class="p-2"><input type="text" v-model="ing.uom" class="w-full border p-1 rounded"></td>
-            <td class="p-2"><input type="number" v-model="ing.yieldPercent" class="w-full border p-1 rounded"></td>
-            <td class="p-2 text-center">
-              <button @click="removeIngredient(index)" class="text-red-500 hover:text-red-700 font-bold">✕</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      
-      <button @click="addIngredient" class="mt-4 text-blue-600 hover:text-blue-800 font-medium text-sm">+ Add Row</button>
-
-    </div>
-  </div>
-
-  <button @click="saveData" :disabled="isSaving" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-lg text-lg shadow-md transition-colors disabled:bg-gray-400">
-    {{ isSaving ? 'Saving...' : '💾 Save Recipe to Database' }}
-  </button>
-
+  </template>
 </div>
 
 <script>
@@ -194,119 +313,273 @@
   createApp({
     data() {
       return {
+        loadingHelperData: true,
+        helperDataError: '',
         isSaving: false,
         showBulk: false,
         bulkText: '',
-        uomData: {
-          'Weight': ['GRM', 'OZ-wt', 'LB'],
-          'Volume': ['ML', 'tsp', 'Tbsp', 'OZ-fl', 'Pint', 'Quart', 'Gallon', '1/2 gallon', 'Cup', 'Dash', 'Drop'],
-          'Count': ['Each']
-        },
+        hasInteracted: false,
+        touched: {},
+        serverErrors: {},
+        serverMessage: '',
+        uomData: { Weight: [], Volume: [], Each: [] },
+        items: [],
         form: {
-          name: '', measureType: '', yieldQty: '', yieldUom: '', 
+          name: '', measureType: '', yieldQty: '', yieldUom: '', reportingUom: '',
           portionSize: '', portionUom: '', inventoryYesNo: 'No', inventoryUom: '',
-          weightQty: '', weightUom: '', volumeQty: '', volumeUom: '', eachQty: '', eachUom: '',
-          costMethod: 'Nightly', cat1: 'Food', cat2: '', costAcct: '', invAcct: '', wasteAcct: ''
+          weightQty: '', weightUom: '', volumeQty: '', volumeUom: '', eachQty: '', eachUom: ''
         },
         ingredients: [
-          { name: '', qty: '', uom: '', yieldPercent: '' }
-        ]
+          { name: '', qty: '', uom: '' }
+        ],
+        instructions: [
+          { text: '', uid: 1 }
+        ],
+        nextInstructionUid: 2,
+        draggingIndex: null,
+        dragOverIndex: null
       }
     },
     computed: {
       availableYieldUoms() { return this.form.measureType ? this.uomData[this.form.measureType] : []; },
+      allUoms() { return [].concat(this.uomData.Weight, this.uomData.Volume, this.uomData.Each); },
+      portionCategory() { return this.getCategory(this.form.portionUom); },
+      inventoryCategory() { return this.getCategory(this.form.inventoryUom); },
       needsEquivalency() {
         if (!this.form.measureType) return false;
         const base = this.form.measureType;
-        const pCat = this.getCategory(this.form.portionUom);
-        const iCat = this.getCategory(this.form.inventoryUom);
-        return (pCat && pCat !== base) || (this.form.inventoryYesNo === 'Yes' && iCat && iCat !== base);
+        return (this.portionCategory && this.portionCategory !== base) ||
+               (this.form.inventoryYesNo === 'Yes' && this.inventoryCategory && this.inventoryCategory !== base);
       },
       requiredEquivCategories() {
         let cats = new Set();
         if (this.needsEquivalency) {
-            cats.add(this.form.measureType);
-            if (this.getCategory(this.form.portionUom)) cats.add(this.getCategory(this.form.portionUom));
-            if (this.form.inventoryYesNo === 'Yes' && this.getCategory(this.form.inventoryUom)) cats.add(this.getCategory(this.form.inventoryUom));
+          cats.add(this.form.measureType);
+          if (this.portionCategory) cats.add(this.portionCategory);
+          if (this.form.inventoryYesNo === 'Yes' && this.inventoryCategory) cats.add(this.inventoryCategory);
         }
         return Array.from(cats);
-      }
+      },
+      meaningfulIngredients() { return this.ingredients.filter(i => i.name && i.name.trim() !== ''); },
+      meaningfulInstructions() { return this.instructions.filter(s => s.text && s.text.trim() !== ''); },
+      ingredientRowErrors() {
+        return this.ingredients.map(ing => {
+          const started = ing.name && ing.name.trim() !== '';
+          if (!started) return { name: false, qty: false, uom: false };
+          return {
+            name: !this.items.includes(ing.name.trim()),
+            qty: !this.isPositiveNumber(ing.qty),
+            uom: !this.allUoms.includes(ing.uom)
+          };
+        });
+      },
+      errors() {
+        const e = {};
+        const measureCategories = ['Weight', 'Volume', 'Each'];
+
+        if (!this.form.name || !this.form.name.trim()) e.name = 'Recipe Name is required.';
+
+        if (measureCategories.indexOf(this.form.measureType) === -1) e.measureType = 'Select a Measure Type.';
+
+        if (!this.isPositiveNumber(this.form.yieldQty)) e.yieldQty = 'Yield Qty must be a number greater than 0.';
+
+        if (this.form.measureType) {
+          if (!this.form.yieldUom || this.uomData[this.form.measureType].indexOf(this.form.yieldUom) === -1) {
+            e.yieldUom = 'Select a valid Yield U of M for ' + this.form.measureType + '.';
+          }
+          if (!this.form.reportingUom || this.uomData[this.form.measureType].indexOf(this.form.reportingUom) === -1) {
+            e.reportingUom = 'Select a valid Reporting U of M for ' + this.form.measureType + '.';
+          }
+        }
+
+        if (this.form.portionUom && !this.portionCategory) e.portionUom = 'Unrecognized Portion U of M.';
+
+        if (this.form.inventoryYesNo === 'Yes' && (!this.form.inventoryUom || !this.inventoryCategory)) {
+          e.inventoryUom = 'Select a valid Inventory U of M.';
+        }
+
+        if (this.needsEquivalency) {
+          if (this.requiredEquivCategories.includes('Weight') &&
+              (!this.isPositiveNumber(this.form.weightQty) || this.uomData.Weight.indexOf(this.form.weightUom) === -1)) {
+            e.weightEquivalency = 'Provide a valid Weight equivalency (Qty + U of M).';
+          }
+          if (this.requiredEquivCategories.includes('Volume') &&
+              (!this.isPositiveNumber(this.form.volumeQty) || this.uomData.Volume.indexOf(this.form.volumeUom) === -1)) {
+            e.volumeEquivalency = 'Provide a valid Volume equivalency (Qty + U of M).';
+          }
+          if (this.requiredEquivCategories.includes('Each') &&
+              (!this.isPositiveNumber(this.form.eachQty) || this.uomData.Each.indexOf(this.form.eachUom) === -1)) {
+            e.eachEquivalency = 'Provide a valid Each equivalency (Qty + U of M).';
+          }
+        }
+
+        if (this.meaningfulIngredients.length === 0) {
+          e.ingredients = 'Add at least one ingredient.';
+        } else if (this.ingredientRowErrors.some(r => r.name || r.qty || r.uom)) {
+          e.ingredients = 'Every ingredient needs a recognized name, a Qty > 0, and a valid U of M.';
+        }
+
+        if (this.meaningfulInstructions.length === 0) {
+          e.instructions = 'Add at least one instruction step.';
+        }
+
+        return e;
+      },
+      errorMessages() { return Object.values(this.errors); },
+      isValid() { return Object.keys(this.errors).length === 0; }
     },
-    watch: {
-      'form.measureType': function() { this.form.yieldUom = ''; }
+    mounted() {
+      this.loadHelperData();
     },
     methods: {
+      loadHelperData() {
+        this.loadingHelperData = true;
+        this.helperDataError = '';
+        google.script.run
+          .withSuccessHandler((data) => {
+            this.uomData = (data && data.uom) || { Weight: [], Volume: [], Each: [] };
+            this.items = (data && data.items) || [];
+            this.loadingHelperData = false;
+          })
+          .withFailureHandler((error) => {
+            this.helperDataError = 'Failed to load recipe data: ' + error.message;
+            this.loadingHelperData = false;
+          })
+          .getHelperData();
+      },
       getCategory(uom) {
         for (let cat in this.uomData) { if (this.uomData[cat].includes(uom)) return cat; }
         return null;
       },
+      isPositiveNumber(value) {
+        const num = Number(value);
+        return value !== '' && value !== null && value !== undefined && !isNaN(num) && num > 0;
+      },
+      touch(field) {
+        this.touched[field] = true;
+        this.hasInteracted = true;
+        if (this.serverErrors[field]) delete this.serverErrors[field];
+      },
+      fieldError(field) {
+        if (this.serverErrors[field]) return this.serverErrors[field];
+        return this.touched[field] ? this.errors[field] : '';
+      },
       addIngredient() {
-        this.ingredients.push({ name: '', qty: '', uom: '', yieldPercent: '' });
+        this.ingredients.push({ name: '', qty: '', uom: '' });
       },
       removeIngredient(index) {
         this.ingredients.splice(index, 1);
         if (this.ingredients.length === 0) this.addIngredient();
       },
+      addInstruction() {
+        this.instructions.push({ text: '', uid: this.nextInstructionUid++ });
+      },
+      removeInstruction(index) {
+        this.instructions.splice(index, 1);
+        if (this.instructions.length === 0) this.addInstruction();
+      },
+      onDragStart(index, evt) {
+        this.draggingIndex = index;
+        if (evt && evt.dataTransfer) {
+          evt.dataTransfer.effectAllowed = 'move';
+          evt.dataTransfer.setData('text/plain', String(index));
+        }
+      },
+      onDragOver(index) {
+        this.dragOverIndex = index;
+      },
+      onDrop(targetIndex) {
+        if (this.draggingIndex === null || this.draggingIndex === targetIndex) {
+          this.draggingIndex = null;
+          this.dragOverIndex = null;
+          return;
+        }
+        const moved = this.instructions.splice(this.draggingIndex, 1)[0];
+        this.instructions.splice(targetIndex, 0, moved);
+        this.draggingIndex = null;
+        this.dragOverIndex = null;
+      },
+      onDragEnd() {
+        this.draggingIndex = null;
+        this.dragOverIndex = null;
+      },
       parseBulkData() {
         if (!this.bulkText.trim()) return;
         const rows = this.bulkText.split('\n');
-        
-        // Clear empty first row if untouched
+
         if (this.ingredients.length === 1 && !this.ingredients[0].name) {
           this.ingredients = [];
         }
 
         rows.forEach(row => {
-          const cols = row.split('\t'); // Split by Excel Tab-spacing
+          const cols = row.split('\t');
           if (cols.length > 0 && cols[0].trim() !== '') {
             this.ingredients.push({
               name: cols[0] ? cols[0].trim() : '',
               qty: cols[1] ? cols[1].trim() : '',
-              uom: cols[2] ? cols[2].trim() : '',
-              yieldPercent: cols[3] ? cols[3].trim() : ''
+              uom: cols[2] ? cols[2].trim() : ''
             });
           }
         });
         this.bulkText = '';
         this.showBulk = false;
+        this.hasInteracted = true;
       },
       saveData() {
-        if(!this.form.name) { alert("Recipe Name is required."); return; }
-        
-        this.isSaving = true;
+        Object.keys(this.form).forEach(k => this.touch(k));
+        this.hasInteracted = true;
+        if (!this.isValid) return;
 
-        const headerData = [
-          this.form.name, this.form.measureType, "GRM", this.form.yieldQty, this.form.yieldUom,
-          this.form.weightQty, this.form.weightUom, this.form.volumeQty, this.form.volumeUom,
-          this.form.eachQty, this.form.eachUom, this.form.portionSize, this.form.portionUom,
-          this.form.inventoryYesNo, this.form.inventoryUom, this.form.costMethod,
-          this.form.cat1, this.form.cat2, "", this.form.inventoryUom, 
-          this.form.costAcct, this.form.invAcct, this.form.wasteAcct, "YES", ""
-        ];
-        
+        this.isSaving = true;
+        this.serverMessage = '';
+        this.serverErrors = {};
+
         const payload = {
-          headerData: headerData,
-          ingredients: this.ingredients
+          name: this.form.name.trim(),
+          measureType: this.form.measureType,
+          yieldQty: this.form.yieldQty,
+          yieldUom: this.form.yieldUom,
+          reportingUom: this.form.reportingUom,
+          portionSize: this.form.portionSize,
+          portionUom: this.form.portionUom,
+          inventoryYesNo: this.form.inventoryYesNo,
+          inventoryUom: this.form.inventoryUom,
+          weightQty: this.form.weightQty,
+          weightUom: this.form.weightUom,
+          volumeQty: this.form.volumeQty,
+          volumeUom: this.form.volumeUom,
+          eachQty: this.form.eachQty,
+          eachUom: this.form.eachUom,
+          ingredients: this.meaningfulIngredients.map(i => ({ name: i.name.trim(), qty: i.qty, uom: i.uom })),
+          instructions: this.meaningfulInstructions.map(s => ({ text: s.text.trim() }))
         };
 
-        // Send to Apps Script
         google.script.run
-          .withSuccessHandler(() => { 
-             alert('Recipe Saved Successfully!'); 
-             this.resetForm(); 
-             this.isSaving = false;
+          .withSuccessHandler((res) => {
+            this.isSaving = false;
+            if (res && res.ok) {
+              alert('Recipe Saved Successfully!');
+              this.resetForm();
+            } else {
+              this.serverErrors = (res && res.errors) || {};
+              this.serverMessage = (res && res.message) || 'Could not save the recipe.';
+            }
           })
           .withFailureHandler((error) => {
-             alert('Error saving recipe: ' + error.message);
-             this.isSaving = false;
+            this.isSaving = false;
+            this.serverMessage = 'Error saving recipe: ' + error.message;
           })
           .saveRecipeFromWeb(payload);
       },
       resetForm() {
-         Object.keys(this.form).forEach(k => this.form[k] = '');
-         this.form.inventoryYesNo = 'No';
-         this.form.costMethod = 'Nightly';
-         this.ingredients = [{ name: '', qty: '', uom: '', yieldPercent: '' }];
+        Object.keys(this.form).forEach(k => { this.form[k] = ''; });
+        this.form.inventoryYesNo = 'No';
+        this.ingredients = [{ name: '', qty: '', uom: '' }];
+        this.instructions = [{ text: '', uid: this.nextInstructionUid++ }];
+        this.touched = {};
+        this.serverErrors = {};
+        this.serverMessage = '';
+        this.hasInteracted = false;
       }
     }
   }).mount('#app')
