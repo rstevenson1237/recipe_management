@@ -151,7 +151,7 @@ function refreshDashboard() {
   var dashboard = ss.getSheetByName(DASHBOARD_SHEET_NAME);
   if (!dashboard) return;
 
-  var startRow = DASHBOARD_TABLE_HEADER_ROW + 1;
+  var startRow = findDashboardHeaderRow_(dashboard) + 1;
   var lastRow = dashboard.getLastRow();
   if (lastRow >= startRow) {
     dashboard.getRange(startRow, 1, lastRow - startRow + 1, DASHBOARD_TABLE_COLUMNS.length).clearContent();
@@ -189,9 +189,33 @@ function appendDashboardRow_(entry) {
   var dashboard = ss.getSheetByName(DASHBOARD_SHEET_NAME);
   if (!dashboard) return;
 
-  var startRow = DASHBOARD_TABLE_HEADER_ROW + 1;
+  var startRow = findDashboardHeaderRow_(dashboard) + 1;
   var nextRow = nextDashboardRow_(dashboard, startRow);
   dashboard.getRange(nextRow, 1, 1, DASHBOARD_TABLE_COLUMNS.length).setValues([buildDashboardRow_(entry)]);
+}
+
+/**
+ * Locates the recipe table's actual header row by searching column A for a cell
+ * that reads exactly "Name" with "Measure Type" immediately to its right (column
+ * B) - i.e. the real header, not just any cell containing the word "Name". Never
+ * trust DASHBOARD_TABLE_HEADER_ROW alone at runtime: rows inserted or deleted
+ * above the table (by hand, or by an older version of this script) shift the
+ * header to a different physical row without updating that constant, which would
+ * otherwise make new recipes land far below the real table with a blank gap in
+ * between. Falls back to the constant only when no header exists yet (a sheet
+ * that hasn't been through renderDashboardLayout_() at all).
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} dashboard
+ * @return {number}
+ */
+function findDashboardHeaderRow_(dashboard) {
+  var matches = dashboard.createTextFinder(DASHBOARD_TABLE_COLUMNS[0]).matchEntireCell(true).matchCase(true).findAll();
+  for (var i = 0; i < matches.length; i++) {
+    var cell = matches[i];
+    if (cell.getColumn() === 1 && cell.getSheet().getRange(cell.getRow(), 2).getValue() === DASHBOARD_TABLE_COLUMNS[1]) {
+      return cell.getRow();
+    }
+  }
+  return DASHBOARD_TABLE_HEADER_ROW;
 }
 
 /**
