@@ -13,11 +13,9 @@ var DASHBOARD_TABLE_COLUMNS = [
  */
 function onOpen() {
   SpreadsheetApp.getUi()
-      .createMenu('🍔 Recipe Tools')
+      .createMenu('Recipe Tools')
       .addItem('Open Recipe UI', 'openRecipeApp')
       .addItem('Export All Recipes (Print)', 'openExportPreview')
-      .addSeparator()
-      .addItem('Setup / Repair Dashboard', 'setupWorkbook')
       .addToUi();
 }
 
