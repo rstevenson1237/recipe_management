@@ -49,3 +49,27 @@ base64 -w0 AtlasLogo_black_60x24.png > Logo.html
 ```
 
 Keep `AtlasLogo_black_60x24.png` in the repo as the source of truth.
+
+## Checking changes before pasting them into Apps Script
+
+None of `package.json`, `tsconfig.json`, `.gitignore`, or `scripts/` deploy anywhere — the Apps
+Script editor only ever sees the `.gs`/`.html` files, pasted in directly (there's no clasp setup
+in this repo; add a `.claspignore` for these files if that changes). They exist purely to catch
+bugs before that paste, because Apps Script's errors are otherwise runtime-only: a call to a
+method that doesn't exist on `Range`/`Sheet`/`Spreadsheet` compiles fine and only fails the moment
+a user clicks something.
+
+```sh
+npm install
+npm run check
+```
+
+This typechecks every `.gs` file against the real API definitions (`@types/google-apps-script`),
+so a bad method name is a build-time error instead of a `TypeError` in front of a user. New `.gs`
+files are picked up automatically. A function whose parameters aren't annotated with `@param`
+JSDoc silently loses this checking for that function (TypeScript can't check what it can't infer
+a type for) — so any new function that takes a `Sheet`/`Spreadsheet`/`Range` should have it
+JSDoc-annotated with the real `GoogleAppsScript.Spreadsheet.*` type, the same way the existing
+functions in `Sheets.gs`/`Save.gs`/`Export.gs`/`Code.gs` are. Loosely-shaped data (the payload
+from the dialog, row values from `getValues()`) is intentionally typed `{*}` rather than modeled
+in full — the point of this check is the Apps Script API surface, not our own data shapes.

@@ -11,6 +11,8 @@
  * { ok: false, errors: {field: message}, message: string } on validation failure.
  * Throws only for genuine infrastructure errors (the client's withFailureHandler
  * covers that case).
+ * @param {*} payload - JSON payload built by Index.html's saveData(); shape isn't
+ *     trusted (that's what validateRecipePayload_ is for), so it's typed loosely.
  */
 function saveRecipeFromWeb(payload) {
   var lock = LockService.getDocumentLock();
@@ -40,17 +42,17 @@ function saveRecipeFromWeb(payload) {
     };
 
     try {
-      var cleanIngredients = payload.ingredients.filter(function(ing) {
+      var cleanIngredients = payload.ingredients.filter(function(/** @type {*} */ ing) {
         return ing.name && String(ing.name).trim() !== '';
       });
-      cleanIngredients.forEach(function(ing, index) {
+      cleanIngredients.forEach(function(/** @type {*} */ ing, /** @type {number} */ index) {
         set.ingredients.appendRow([name, String(ing.name).trim(), ing.qty, ing.uom, index + 1]);
       });
 
-      var cleanSteps = payload.instructions.filter(function(step) {
+      var cleanSteps = payload.instructions.filter(function(/** @type {*} */ step) {
         return step.text && String(step.text).trim() !== '';
       });
-      cleanSteps.forEach(function(step, index) {
+      cleanSteps.forEach(function(/** @type {*} */ step, /** @type {number} */ index) {
         set.instructions.appendRow([name, index + 1, String(step.text).trim()]);
       });
 
@@ -90,6 +92,8 @@ function saveRecipeFromWeb(payload) {
 /**
  * Deletes any rows appended beyond targetLastRow, restoring a sheet to the row
  * count it had before a failed write.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} targetLastRow
  */
 function truncateSheetToRow_(sheet, targetLastRow) {
   var currentLastRow = sheet.getLastRow();
@@ -102,8 +106,12 @@ function truncateSheetToRow_(sheet, targetLastRow) {
  * Validates the payload against live Helper Data. Returns a map of field name ->
  * error message; an empty object means the payload is valid. Keys match the
  * field-level error keys the dialog displays inline.
+ * @param {*} payload
+ * @param {HelperData} helperData
+ * @return {Object<string, string>}
  */
 function validateRecipePayload_(payload, helperData) {
+  /** @type {Object<string, string>} */
   var errors = {};
   var measureCategories = ['Weight', 'Volume', 'Each'];
 
@@ -119,10 +127,11 @@ function validateRecipePayload_(payload, helperData) {
   }
 
   if (payload.measureType && measureCategories.indexOf(payload.measureType) !== -1) {
-    if (!payload.yieldUom || helperData.uom[payload.measureType].indexOf(payload.yieldUom) === -1) {
+    var measureTypeUoms = getUomListForCategory_(helperData, payload.measureType);
+    if (!payload.yieldUom || measureTypeUoms.indexOf(payload.yieldUom) === -1) {
       errors.yieldUom = 'Select a valid Yield U of M for ' + payload.measureType + '.';
     }
-    if (!payload.reportingUom || helperData.uom[payload.measureType].indexOf(payload.reportingUom) === -1) {
+    if (!payload.reportingUom || measureTypeUoms.indexOf(payload.reportingUom) === -1) {
       errors.reportingUom = 'Select a valid Reporting U of M for ' + payload.measureType + '.';
     }
   }
@@ -168,14 +177,14 @@ function validateRecipePayload_(payload, helperData) {
 
   var allUoms = helperData.uom.Weight.concat(helperData.uom.Volume, helperData.uom.Each);
   var ingredients = Array.isArray(payload.ingredients) ? payload.ingredients : [];
-  var meaningfulIngredients = ingredients.filter(function(ing) {
+  var meaningfulIngredients = ingredients.filter(function(/** @type {*} */ ing) {
     return ing && ing.name && String(ing.name).trim() !== '';
   });
 
   if (meaningfulIngredients.length === 0) {
     errors.ingredients = 'Add at least one ingredient.';
   } else {
-    var ingredientProblem = meaningfulIngredients.some(function(ing) {
+    var ingredientProblem = meaningfulIngredients.some(function(/** @type {*} */ ing) {
       var validName = helperData.items.indexOf(String(ing.name).trim()) !== -1;
       var validQty = isPositiveNumber_(ing.qty);
       var validUom = allUoms.indexOf(ing.uom) !== -1;
@@ -187,7 +196,7 @@ function validateRecipePayload_(payload, helperData) {
   }
 
   var instructions = Array.isArray(payload.instructions) ? payload.instructions : [];
-  var meaningfulSteps = instructions.filter(function(step) {
+  var meaningfulSteps = instructions.filter(function(/** @type {*} */ step) {
     return step && step.text && String(step.text).trim() !== '';
   });
   if (meaningfulSteps.length === 0) {
@@ -197,15 +206,38 @@ function validateRecipePayload_(payload, helperData) {
   return errors;
 }
 
+/**
+ * @param {*} value
+ * @return {boolean}
+ */
 function isPositiveNumber_(value) {
   var num = Number(value);
   return value !== '' && value !== null && value !== undefined && !isNaN(num) && num > 0;
 }
 
+/**
+ * @param {HelperData} helperData
+ * @param {*} category
+ * @return {string[]}
+ */
+function getUomListForCategory_(helperData, category) {
+  if (category === 'Weight') return helperData.uom.Weight;
+  if (category === 'Volume') return helperData.uom.Volume;
+  if (category === 'Each') return helperData.uom.Each;
+  return [];
+}
+
+/**
+ * @param {HelperData} helperData
+ * @param {*} uom
+ * @return {?string}
+ */
 function findUomCategory_(helperData, uom) {
   if (!uom) return null;
-  for (var category in helperData.uom) {
-    if (helperData.uom[category].indexOf(uom) !== -1) return category;
+  /** @type {Array<keyof HelperData['uom']>} */
+  var categories = ['Weight', 'Volume', 'Each'];
+  for (var i = 0; i < categories.length; i++) {
+    if (helperData.uom[categories[i]].indexOf(uom) !== -1) return categories[i];
   }
   return null;
 }

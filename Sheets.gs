@@ -36,6 +36,8 @@ var DEFAULT_UOM_SEED = {
 
 /**
  * Formats a date as DDMMYY using the spreadsheet's own timezone.
+ * @param {Date} date
+ * @return {string}
  */
 function formatDateKey_(date) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -45,15 +47,28 @@ function formatDateKey_(date) {
 /**
  * Builds the suffixed key for the Nth set of a given base date key.
  * suffixIndex 1 -> "190826", 2 -> "190826 (2)", 3 -> "190826 (3)", ...
+ * @param {string} baseKey
+ * @param {number} suffixIndex
+ * @return {string}
  */
 function buildSetKey_(baseKey, suffixIndex) {
   return suffixIndex === 1 ? baseKey : baseKey + ' (' + suffixIndex + ')';
 }
 
 /**
+ * @typedef {Object} SheetSet
+ * @property {string} key
+ * @property {GoogleAppsScript.Spreadsheet.Sheet} headers
+ * @property {GoogleAppsScript.Spreadsheet.Sheet} ingredients
+ * @property {GoogleAppsScript.Spreadsheet.Sheet} instructions
+ */
+
+/**
  * Returns {headers, ingredients, instructions} sheet objects for a key, creating
  * whichever of the three are missing (hidden, with a frozen, labeled header row).
  * Creating/repairing all three together is what keeps them in lock step.
+ * @param {string} key
+ * @return {SheetSet}
  */
 function ensureSheetSetComplete_(key) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -65,6 +80,12 @@ function ensureSheetSetComplete_(key) {
   };
 }
 
+/**
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ * @param {string} name
+ * @param {string[]} columns
+ * @return {GoogleAppsScript.Spreadsheet.Sheet}
+ */
 function getOrCreateDbSheet_(ss, name, columns) {
   var sheet = ss.getSheetByName(name);
   if (sheet) return sheet;
@@ -82,6 +103,8 @@ function getOrCreateDbSheet_(ss, name, columns) {
  * base key itself, or the next-numbered suffix once the current one holds
  * MAX_RECIPES_PER_SET recipes. Pure lookup - does not create or modify sheets -
  * which is what makes it safe to exercise directly from runSelfTest().
+ * @param {string} baseKey
+ * @return {string}
  */
 function resolveActiveKey_(baseKey) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -104,6 +127,7 @@ function resolveActiveKey_(baseKey) {
  * Resolves the sheet set that a new recipe should be written into: today's set,
  * or the next-numbered set for today once the current one holds MAX_RECIPES_PER_SET
  * recipes. Creates sheets as needed.
+ * @return {SheetSet}
  */
 function getActiveSheetSet() {
   var baseKey = formatDateKey_(new Date());
@@ -114,9 +138,11 @@ function getActiveSheetSet() {
 /**
  * Enumerates every existing sheet set (across all dates), repairing any that are
  * missing one of the three sheets. Used by export and by the duplicate-name check.
+ * @return {SheetSet[]}
  */
 function listAllSheetSets_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  /** @type {string[]} */
   var keys = [];
 
   ss.getSheets().forEach(function(sheet) {
@@ -134,6 +160,9 @@ function listAllSheetSets_() {
 /**
  * Reads all data rows (excluding the header row) from a sheet, trimmed to the
  * given column count. Returns [] for an empty/header-only sheet.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {number} columnCount
+ * @return {Array<Array<*>>}
  */
 function getDataRows_(sheet, columnCount) {
   var lastRow = sheet.getLastRow();
@@ -145,6 +174,8 @@ function getDataRows_(sheet, columnCount) {
  * Checks whether a recipe name already exists in ANY header sheet, across all
  * date-keyed sets. Comparison is case-insensitive and trims whitespace, since
  * Name is the join key across all three DB sheets and must be unique.
+ * @param {string} name
+ * @return {boolean}
  */
 function recipeNameExists_(name) {
   var normalized = String(name).trim().toLowerCase();
@@ -165,6 +196,7 @@ function recipeNameExists_(name) {
  * Ensures the Helper Data sheet exists, hidden, with headers and (if empty of
  * data) the default UOM lists seeded in. Item Data (column D) is left for the
  * workbook owner to populate with the allowed ingredient list.
+ * @return {GoogleAppsScript.Spreadsheet.Sheet}
  */
 function ensureHelperDataSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -195,14 +227,23 @@ function ensureHelperDataSheet_() {
 }
 
 /**
+ * @typedef {Object} HelperData
+ * @property {{Weight: string[], Volume: string[], Each: string[]}} uom
+ * @property {string[]} items
+ */
+
+/**
  * Reads Helper Data into the shape the dialog and server-side validation both use:
  * { uom: { Weight: [...], Volume: [...], Each: [...] }, items: [...] }
+ * @return {HelperData}
  */
 function getHelperData() {
   var sheet = ensureHelperDataSheet_();
   var rows = getDataRows_(sheet, HELPER_COLUMNS.length);
 
+  /** @type {HelperData} */
   var result = { uom: { Weight: [], Volume: [], Each: [] }, items: [] };
+  /** @type {Object<string, boolean>} */
   var seenItems = {};
 
   rows.forEach(function(row) {
@@ -236,13 +277,22 @@ function getHelperData() {
 function runSelfTest() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var testBaseKey = 'TEST' + new Date().getTime();
+  /** @type {string[]} */
   var createdSheetNames = [];
 
+  /**
+   * @param {boolean} condition
+   * @param {string} message
+   */
   function assert(condition, message) {
     if (!condition) throw new Error('runSelfTest FAILED: ' + message);
     Logger.log('OK: ' + message);
   }
 
+  /**
+   * @param {SheetSet} set
+   * @return {SheetSet}
+   */
   function trackSet(set) {
     [set.headers, set.ingredients, set.instructions].forEach(function(sheet) {
       createdSheetNames.push(sheet.getName());

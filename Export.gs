@@ -28,11 +28,42 @@ function getLogoDataUri_() {
 }
 
 /**
+ * @typedef {Object} RecipeIngredient
+ * @property {*} name
+ * @property {*} qty
+ * @property {*} uom
+ */
+
+/**
+ * @typedef {Object} Recipe
+ * @property {string} name
+ * @property {*} measureType
+ * @property {*} reportingUom
+ * @property {*} yieldQty
+ * @property {*} yieldUom
+ * @property {*} weightQty
+ * @property {*} weightUom
+ * @property {*} volumeQty
+ * @property {*} volumeUom
+ * @property {*} eachQty
+ * @property {*} eachUom
+ * @property {*} portionSize
+ * @property {*} portionUom
+ * @property {*} availableInInventory
+ * @property {*} inventoryUom
+ * @property {RecipeIngredient[]} ingredients
+ * @property {*[]} steps
+ * @property {string} sourceKey
+ */
+
+/**
  * Collects every recipe across every DB sheet set, merges its Ingredients and
  * Instructions rows in, and returns them sorted alphabetically by name.
+ * @return {Recipe[]}
  */
 function exportAllRecipes() {
   var sets = listAllSheetSets_();
+  /** @type {Recipe[]} */
   var recipes = [];
 
   sets.forEach(function(set) {
