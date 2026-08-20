@@ -84,7 +84,19 @@ function saveRecipeFromWeb(payload) {
       throw writeError;
     }
 
-    refreshDashboard();
+    // Append-only: avoids rescanning every recipe on file just to add one row.
+    // Full re-sort is available via the "Setup / Repair Dashboard" menu item.
+    appendDashboardRow_({
+      name: name,
+      measureType: payload.measureType,
+      yieldQty: payload.yieldQty,
+      yieldUom: payload.yieldUom,
+      portionSize: payload.portionSize,
+      portionUom: payload.portionUom,
+      ingredientCount: cleanIngredients.length,
+      stepCount: cleanSteps.length,
+      sourceKey: set.key
+    });
     return { ok: true };
   } finally {
     lock.releaseLock();

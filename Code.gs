@@ -140,8 +140,11 @@ function renderDashboardLayout_(sheet) {
 }
 
 /**
- * Rebuilds the recipe list on the Dashboard from every DB sheet set on file.
- * Called after every successful save and from the setup menu item.
+ * Full resync of the Dashboard's recipe list from every DB sheet set on file -
+ * clears the table and rewrites it sorted alphabetically. This is the expensive
+ * path (it rescans every recipe ever entered), so it's reserved for first-time
+ * setup and the "Setup / Repair Dashboard" menu item. A normal save uses
+ * appendDashboardRow_() instead, which only writes the one new row.
  */
 function refreshDashboard() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -158,19 +161,89 @@ function refreshDashboard() {
   if (recipes.length === 0) return;
 
   var rows = recipes.map(function(recipe) {
-    return [
-      recipe.name,
-      recipe.measureType,
-      formatQtyUom_(recipe.yieldQty, recipe.yieldUom),
-      formatQtyUom_(recipe.portionSize, recipe.portionUom),
-      recipe.ingredients.length,
-      recipe.steps.length,
-      dateKeyToDisplay_(recipe.sourceKey),
-      recipe.sourceKey
-    ];
+    return buildDashboardRow_({
+      name: recipe.name,
+      measureType: recipe.measureType,
+      yieldQty: recipe.yieldQty,
+      yieldUom: recipe.yieldUom,
+      portionSize: recipe.portionSize,
+      portionUom: recipe.portionUom,
+      ingredientCount: recipe.ingredients.length,
+      stepCount: recipe.steps.length,
+      sourceKey: recipe.sourceKey
+    });
   });
 
   dashboard.getRange(startRow, 1, rows.length, DASHBOARD_TABLE_COLUMNS.length).setValues(rows);
+}
+
+/**
+ * Appends a single recipe to the Dashboard's recipe table, in the next available
+ * (first empty) row after the header - the fast path called after every save
+ * instead of rebuilding the whole table. New recipes land in save order, not
+ * resorted alphabetically; run "Setup / Repair Dashboard" to re-sort if desired.
+ * @param {DashboardRowEntry} entry
+ */
+function appendDashboardRow_(entry) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var dashboard = ss.getSheetByName(DASHBOARD_SHEET_NAME);
+  if (!dashboard) return;
+
+  var startRow = DASHBOARD_TABLE_HEADER_ROW + 1;
+  var nextRow = nextDashboardRow_(dashboard, startRow);
+  dashboard.getRange(nextRow, 1, 1, DASHBOARD_TABLE_COLUMNS.length).setValues([buildDashboardRow_(entry)]);
+}
+
+/**
+ * Finds the next available row for a new recipe: the first empty cell in the
+ * Dashboard's Name column (A) at or after startRow. Reads the whole column in one
+ * batched call rather than trusting Sheet.getLastRow(), which would be thrown off
+ * by unrelated content elsewhere on the sheet (e.g. the button-placeholder box).
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} dashboard
+ * @param {number} startRow
+ * @return {number}
+ */
+function nextDashboardRow_(dashboard, startRow) {
+  var maxRows = dashboard.getMaxRows();
+  if (maxRows < startRow) return startRow;
+
+  var nameColumn = dashboard.getRange(startRow, 1, maxRows - startRow + 1, 1).getValues();
+  for (var i = 0; i < nameColumn.length; i++) {
+    if (nameColumn[i][0] === '' || nameColumn[i][0] === null) return startRow + i;
+  }
+  return startRow + nameColumn.length;
+}
+
+/**
+ * @typedef {Object} DashboardRowEntry
+ * @property {string} name
+ * @property {*} measureType
+ * @property {*} yieldQty
+ * @property {*} yieldUom
+ * @property {*} portionSize
+ * @property {*} portionUom
+ * @property {number} ingredientCount
+ * @property {number} stepCount
+ * @property {string} sourceKey
+ */
+
+/**
+ * Builds one Dashboard table row (matching DASHBOARD_TABLE_COLUMNS order) from
+ * either a full Recipe (refreshDashboard) or the payload just saved (appendDashboardRow_).
+ * @param {DashboardRowEntry} entry
+ * @return {Array<*>}
+ */
+function buildDashboardRow_(entry) {
+  return [
+    entry.name,
+    entry.measureType,
+    formatQtyUom_(entry.yieldQty, entry.yieldUom),
+    formatQtyUom_(entry.portionSize, entry.portionUom),
+    entry.ingredientCount,
+    entry.stepCount,
+    dateKeyToDisplay_(entry.sourceKey),
+    entry.sourceKey
+  ];
 }
 
 /**

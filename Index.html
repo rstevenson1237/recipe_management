@@ -227,6 +227,7 @@
                     <td class="p-2">
                       <input type="number" v-model="ing.qty" @input="hasInteracted = true"
                              class="w-full border p-1 rounded" :class="{'field-error': ingredientRowErrors[index].qty}">
+                      <p v-if="ingredientRowErrors[index].qty" class="text-xs text-red-600 mt-1">Qty &gt; 0 required</p>
                     </td>
                     <td class="p-2">
                       <select v-model="ing.uom" @change="hasInteracted = true"
@@ -236,6 +237,7 @@
                         <optgroup label="Volume"><option v-for="uom in uomData.Volume" :key="uom">{{ uom }}</option></optgroup>
                         <optgroup label="Each"><option v-for="uom in uomData.Each" :key="uom">{{ uom }}</option></optgroup>
                       </select>
+                      <p v-if="ingredientRowErrors[index].uom" class="text-xs text-red-600 mt-1">Select a U of M</p>
                     </td>
                     <td class="p-2 text-center">
                       <button @click="removeIngredient(index)" class="text-red-500 hover:text-red-700 font-bold">✕</button>
@@ -278,15 +280,10 @@
       </div>
     </div>
 
-    <!-- STICKY FOOTER: ERROR SUMMARY + SAVE -->
+    <!-- STICKY FOOTER: SAVE -->
     <div class="border-t bg-white p-4 sm:p-6 shadow-inner">
       <div class="max-w-5xl mx-auto">
-        <div v-if="errorMessages.length" class="mb-3 bg-red-50 border border-red-300 rounded p-3">
-          <p class="text-sm font-bold text-red-700 mb-1">{{ errorMessages.length }} item(s) need attention:</p>
-          <ul class="text-xs text-red-600 list-disc list-inside">
-            <li v-for="msg in errorMessages" :key="msg">{{ msg }}</li>
-          </ul>
-        </div>
+        <p v-if="!isValid && hasInteracted" class="mb-3 text-sm text-red-600">Some fields need attention - see the warnings above.</p>
         <div v-if="serverMessage" class="mb-3 bg-red-50 border border-red-300 rounded p-3 text-sm text-red-700">
           {{ serverMessage }}
         </div>
@@ -409,7 +406,6 @@
 
         return e;
       },
-      errorMessages() { return Object.values(this.errors); },
       isValid() { return Object.keys(this.errors).length === 0; }
     },
     watch: {
@@ -564,7 +560,12 @@
         this.hasInteracted = true;
       },
       saveData() {
+        // form{} doesn't cover every validated field - 'ingredients' lives outside
+        // it, and the equivalency errors are keyed by category name, not by the
+        // weightQty/weightUom-style form keys - so those need touching explicitly
+        // or their warnings would never surface on a blocked Save attempt.
         Object.keys(this.form).forEach(k => this.touch(k));
+        ['ingredients', 'weightEquivalency', 'volumeEquivalency', 'eachEquivalency'].forEach(k => this.touch(k));
         this.hasInteracted = true;
         if (!this.isValid) return;
 
