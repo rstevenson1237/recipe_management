@@ -84,13 +84,14 @@ function getOrCreateDashboardSheet_() {
  * Writes the static parts of the Dashboard: title, usage instructions, the
  * one-time "insert your button here" box, and the recipe-table header row.
  * Safe to re-run - it never touches the recipe rows written by refreshDashboard().
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
  */
 function renderDashboardLayout_(sheet) {
   sheet.getRange('A1:H1').merge()
       .setValue('🍔 Recipe Management Dashboard')
       .setFontSize(18).setFontWeight('bold')
       .setBackground('#1e293b').setFontColor('#ffffff')
-      .setVerticalAlign('middle');
+      .setVerticalAlignment('middle');
   sheet.setRowHeight(1, 36);
 
   sheet.getRange('A3').setValue('How to use this workbook').setFontWeight('bold').setFontSize(12);
@@ -110,13 +111,13 @@ function renderDashboardLayout_(sheet) {
   sheet.getRange('A4:H13').merge()
       .setValue(instructions)
       .setWrap(true)
-      .setVerticalAlign('top')
+      .setVerticalAlignment('top')
       .setFontSize(10);
 
   sheet.getRange('J2:M8').merge()
       .setValue('⬅ Insert your "New Recipe" button drawing here.\n\nSee the setup note at left for how to assign it to openRecipeApp.')
       .setWrap(true)
-      .setVerticalAlign('middle')
+      .setVerticalAlignment('middle')
       .setHorizontalAlignment('center')
       .setFontStyle('italic')
       .setFontColor('#64748b')
@@ -166,6 +167,11 @@ function refreshDashboard() {
   dashboard.getRange(startRow, 1, rows.length, DASHBOARD_TABLE_COLUMNS.length).setValues(rows);
 }
 
+/**
+ * @param {*} qty
+ * @param {*} uom
+ * @return {string}
+ */
 function formatQtyUom_(qty, uom) {
   if (qty === '' || qty === null || qty === undefined) return '';
   return uom ? qty + ' ' + uom : String(qty);
@@ -174,6 +180,8 @@ function formatQtyUom_(qty, uom) {
 /**
  * Turns a sheet-set key like "190826" or "190826 (2)" back into a readable date
  * (MM/DD/YYYY), falling back to the raw key if it doesn't parse as DDMMYY.
+ * @param {string} key
+ * @return {string}
  */
 function dateKeyToDisplay_(key) {
   var match = /^(\d{2})(\d{2})(\d{2})/.exec(key);
