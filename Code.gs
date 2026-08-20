@@ -29,7 +29,13 @@ function openRecipeApp() {
   // crashes on a blank workbook, without re-running full setup on every open.
   ensureWorkbookInitialized_();
 
-  var html = HtmlService.createHtmlOutputFromFile('Index')
+  // Helper Data is inlined into the page here (instead of the dialog fetching it
+  // over google.script.run after showing a loading spinner) so the form is
+  // interactive the instant the modal renders, with no extra client-server round trip.
+  var template = HtmlService.createTemplateFromFile('Index');
+  template.helperDataJson = JSON.stringify(getHelperData()).replace(/</g, '\\u003c');
+
+  var html = template.evaluate()
       .setWidth(1100)
       .setHeight(800)
       .setTitle('Recipe Management Interface');

@@ -45,21 +45,23 @@ function saveRecipeFromWeb(payload) {
       var cleanIngredients = payload.ingredients.filter(function(/** @type {*} */ ing) {
         return ing.name && String(ing.name).trim() !== '';
       });
-      cleanIngredients.forEach(function(/** @type {*} */ ing, /** @type {number} */ index) {
-        set.ingredients.appendRow([name, String(ing.name).trim(), ing.qty, ing.uom, index + 1]);
+      var ingredientRows = cleanIngredients.map(function(/** @type {*} */ ing, /** @type {number} */ index) {
+        return [name, String(ing.name).trim(), ing.qty, ing.uom, index + 1];
       });
+      appendRows_(set.ingredients, ingredientRows);
 
       var cleanSteps = payload.instructions.filter(function(/** @type {*} */ step) {
         return step.text && String(step.text).trim() !== '';
       });
-      cleanSteps.forEach(function(/** @type {*} */ step, /** @type {number} */ index) {
-        set.instructions.appendRow([name, index + 1, String(step.text).trim()]);
+      var instructionRows = cleanSteps.map(function(/** @type {*} */ step, /** @type {number} */ index) {
+        return [name, index + 1, String(step.text).trim()];
       });
+      appendRows_(set.instructions, instructionRows);
 
-      set.headers.appendRow([
+      appendRows_(set.headers, [[
         name,
         payload.measureType,
-        payload.reportingUom,
+        payload.yieldUom, // Reporting U of M always mirrors Yield U of M - not prompted for separately.
         payload.yieldQty,
         payload.yieldUom,
         payload.weightQty || '',
@@ -72,7 +74,7 @@ function saveRecipeFromWeb(payload) {
         payload.portionUom || '',
         payload.inventoryYesNo,
         payload.inventoryUom || ''
-      ]);
+      ]]);
     } catch (writeError) {
       // Roll every sheet back to its pre-write row count so the trio never drifts
       // out of lock step because of a partial write.
@@ -87,6 +89,19 @@ function saveRecipeFromWeb(payload) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Appends every row in a single batched write instead of one appendRow() call per
+ * row - each appendRow() is its own round trip to the Sheets service, so this
+ * turns an O(rows) sequence of calls into one for the multi-row ingredient and
+ * instruction writes. No-op for an empty rows array.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Array<Array<*>>} rows
+ */
+function appendRows_(sheet, rows) {
+  if (rows.length === 0) return;
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
 }
 
 /**
@@ -131,9 +146,6 @@ function validateRecipePayload_(payload, helperData) {
     if (!payload.yieldUom || measureTypeUoms.indexOf(payload.yieldUom) === -1) {
       errors.yieldUom = 'Select a valid Yield U of M for ' + payload.measureType + '.';
     }
-    if (!payload.reportingUom || measureTypeUoms.indexOf(payload.reportingUom) === -1) {
-      errors.reportingUom = 'Select a valid Reporting U of M for ' + payload.measureType + '.';
-    }
   }
 
   var portionCategory = findUomCategory_(helperData, payload.portionUom);
@@ -148,30 +160,27 @@ function validateRecipePayload_(payload, helperData) {
     }
   }
 
-  var needsEquivalency =
-    (portionCategory && portionCategory !== payload.measureType) ||
-    (payload.inventoryYesNo === 'Yes' &&
-      findUomCategory_(helperData, payload.inventoryUom) &&
-      findUomCategory_(helperData, payload.inventoryUom) !== payload.measureType);
+  // Only the category that actually conflicts with the recipe's Measure Type needs
+  // an equivalency entry - the base category is filled from Yield automatically.
+  var inventoryEquivCategory = payload.inventoryYesNo === 'Yes' ? findUomCategory_(helperData, payload.inventoryUom) : null;
+  /** @type {Object<string, boolean>} */
+  var conflictCategories = {};
+  if (portionCategory && portionCategory !== payload.measureType) conflictCategories[portionCategory] = true;
+  if (inventoryEquivCategory && inventoryEquivCategory !== payload.measureType) conflictCategories[inventoryEquivCategory] = true;
 
-  if (needsEquivalency) {
-    if (payload.measureType === 'Weight' || portionCategory === 'Weight' ||
-        (payload.inventoryYesNo === 'Yes' && findUomCategory_(helperData, payload.inventoryUom) === 'Weight')) {
-      if (!isPositiveNumber_(payload.weightQty) || helperData.uom.Weight.indexOf(payload.weightUom) === -1) {
-        errors.weightEquivalency = 'Provide a valid Weight equivalency (Qty + U of M).';
-      }
+  if (conflictCategories.Weight) {
+    if (!isPositiveNumber_(payload.weightQty) || helperData.uom.Weight.indexOf(payload.weightUom) === -1) {
+      errors.weightEquivalency = 'Provide a valid Weight equivalency (Qty + U of M).';
     }
-    if (payload.measureType === 'Volume' || portionCategory === 'Volume' ||
-        (payload.inventoryYesNo === 'Yes' && findUomCategory_(helperData, payload.inventoryUom) === 'Volume')) {
-      if (!isPositiveNumber_(payload.volumeQty) || helperData.uom.Volume.indexOf(payload.volumeUom) === -1) {
-        errors.volumeEquivalency = 'Provide a valid Volume equivalency (Qty + U of M).';
-      }
+  }
+  if (conflictCategories.Volume) {
+    if (!isPositiveNumber_(payload.volumeQty) || helperData.uom.Volume.indexOf(payload.volumeUom) === -1) {
+      errors.volumeEquivalency = 'Provide a valid Volume equivalency (Qty + U of M).';
     }
-    if (payload.measureType === 'Each' || portionCategory === 'Each' ||
-        (payload.inventoryYesNo === 'Yes' && findUomCategory_(helperData, payload.inventoryUom) === 'Each')) {
-      if (!isPositiveNumber_(payload.eachQty) || helperData.uom.Each.indexOf(payload.eachUom) === -1) {
-        errors.eachEquivalency = 'Provide a valid Each equivalency (Qty + U of M).';
-      }
+  }
+  if (conflictCategories.Each) {
+    if (!isPositiveNumber_(payload.eachQty) || helperData.uom.Each.indexOf(payload.eachUom) === -1) {
+      errors.eachEquivalency = 'Provide a valid Each equivalency (Qty + U of M).';
     }
   }
 
@@ -193,14 +202,6 @@ function validateRecipePayload_(payload, helperData) {
     if (ingredientProblem) {
       errors.ingredients = 'Every ingredient needs a recognized name, a Qty > 0, and a valid U of M.';
     }
-  }
-
-  var instructions = Array.isArray(payload.instructions) ? payload.instructions : [];
-  var meaningfulSteps = instructions.filter(function(/** @type {*} */ step) {
-    return step && step.text && String(step.text).trim() !== '';
-  });
-  if (meaningfulSteps.length === 0) {
-    errors.instructions = 'Add at least one instruction step.';
   }
 
   return errors;

@@ -27,6 +27,7 @@
       min-height: 550px;
     }
     .recipe-header { border-bottom: 2px solid #1e293b; padding-bottom: 10px; margin-bottom: 16px; }
+    .recipe-header-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
     .recipe-header h2 { margin: 0 0 8px; font-size: 22px; }
     .meta-grid {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -44,7 +45,8 @@
     .instructions-col ol { padding-left: 20px; margin: 0; font-size: 13px; }
     .instructions-col li { padding: 6px 0; white-space: pre-wrap; }
 
-    .logo { position: absolute; left: 32px; bottom: 16px; height: 24px; }
+    .logo { height: 32px; flex-shrink: 0; }
+    .page-footer { position: absolute; right: 32px; bottom: 16px; font-size: 11px; color: #64748b; }
 
     @media screen {
       .recipe-page { max-width: 900px; margin: 20px auto; box-shadow: 0 1px 4px rgba(0,0,0,.15); border-radius: 6px; }
@@ -72,7 +74,10 @@
     <? var r = recipes[i]; ?>
     <div class="recipe-page">
       <div class="recipe-header">
-        <h2><?= r.name ?></h2>
+        <div class="recipe-header-top">
+          <h2><?= r.name ?></h2>
+          <img class="logo" src="<?!= logoDataUri ?>" alt="logo">
+        </div>
         <div class="meta-grid">
           <div><strong>Measure Type:</strong> <?= r.measureType ?></div>
           <div><strong>Yield:</strong> <?= r.yieldQty ?> <?= r.yieldUom ?></div>
@@ -111,7 +116,7 @@
         </div>
       </div>
 
-      <img class="logo" src="<?!= logoDataUri ?>" alt="logo">
+      <div class="page-footer">Recipe <?= i + 1 ?> of <?= recipes.length ?></div>
     </div>
   <? } ?>
 <? } ?>
