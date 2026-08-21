@@ -56,6 +56,12 @@
       .toolbar { display: none; }
       .recipe-page { page-break-after: always; }
       .recipe-page:last-child { page-break-after: auto; }
+      /* Target sheet is letter (8.5in x 11in); with the 0.5in @page margin below,
+         the printable area per page is 7.5in x 10in. Stretching each recipe-page to
+         that full height (instead of the much shorter screen-preview 550px) is what
+         keeps .page-footer's bottom:16px pinned to the true bottom of the printed
+         page instead of floating partway down it. */
+      .recipe-page { min-height: 10in; }
       @page { size: letter; margin: 0.5in; }
     }
   </style>
@@ -79,14 +85,8 @@
           <img class="logo" src="<?!= logoDataUri ?>" alt="logo">
         </div>
         <div class="meta-grid">
-          <div><strong>Measure Type:</strong> <?= r.measureType ?></div>
           <div><strong>Yield:</strong> <?= r.yieldQty ?> <?= r.yieldUom ?></div>
-          <div><strong>Reporting U of M:</strong> <?= r.reportingUom ?></div>
           <div><strong>Portion:</strong> <?= r.portionSize ?> <?= r.portionUom ?></div>
-          <div><strong>In Inventory:</strong> <?= r.availableInInventory ?></div>
-          <? if (r.availableInInventory === 'Yes') { ?>
-            <div><strong>Inventory U of M:</strong> <?= r.inventoryUom ?></div>
-          <? } ?>
         </div>
       </div>
 

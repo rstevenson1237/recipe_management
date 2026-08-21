@@ -17,6 +17,16 @@ function onOpen() {
       .addItem('Open Recipe UI', 'openRecipeApp')
       .addItem('Export All Recipes (Print)', 'openExportPreview')
       .addToUi();
+
+  // Warm the Helper Data cache now, while the user is just looking at the sheet, so
+  // openRecipeApp() can pull it straight from cache instead of reading the Helper
+  // Data sheet at the moment the user clicks "New Recipe".
+  try {
+    ensureHelperDataSheet_();
+    warmHelperDataCache_();
+  } catch (warmError) {
+    // Non-fatal: openRecipeApp() falls back to a fresh read on a cache miss.
+  }
 }
 
 /**
@@ -30,8 +40,10 @@ function openRecipeApp() {
   // Helper Data is inlined into the page here (instead of the dialog fetching it
   // over google.script.run after showing a loading spinner) so the form is
   // interactive the instant the modal renders, with no extra client-server round trip.
+  // getHelperDataCached_() reads it from the document cache warmed by onOpen(),
+  // instead of hitting the Helper Data sheet again right as the dialog opens.
   var template = HtmlService.createTemplateFromFile('Index');
-  template.helperDataJson = JSON.stringify(getHelperData()).replace(/</g, '\\u003c');
+  template.helperDataJson = JSON.stringify(getHelperDataCached_()).replace(/</g, '\\u003c');
 
   var html = template.evaluate()
       .setWidth(1100)

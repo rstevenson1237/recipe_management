@@ -37,6 +37,23 @@
 
 <div id="app" class="h-screen flex flex-col">
 
+  <!-- Toasts: background-save progress/result. Fixed so they stay put regardless
+       of form scroll position, and stack bottom-up as more arrive. -->
+  <div class="fixed bottom-4 right-4 z-50 flex flex-col-reverse gap-2 w-80 max-w-[90vw]">
+    <div v-for="toast in toasts" :key="toast.id"
+         class="rounded-lg shadow-lg p-3 text-sm flex items-start gap-2"
+         :class="{
+           'bg-slate-800 text-white': toast.type === 'info',
+           'bg-green-600 text-white': toast.type === 'success',
+           'bg-red-50 border border-red-300 text-red-800': toast.type === 'error'
+         }">
+      <span class="flex-1">{{ toast.message }}</span>
+      <button v-if="toast.payload" @click="restoreToast(toast)"
+              class="underline font-medium whitespace-nowrap">Restore</button>
+      <button @click="dismissToast(toast.id)" class="font-bold leading-none opacity-70 hover:opacity-100">✕</button>
+    </div>
+  </div>
+
   <!-- Loading / error states -->
   <div v-if="loadingHelperData" class="flex-1 flex items-center justify-center text-gray-500">
     Loading recipe data...
@@ -287,9 +304,9 @@
         <div v-if="serverMessage" class="mb-3 bg-red-50 border border-red-300 rounded p-3 text-sm text-red-700">
           {{ serverMessage }}
         </div>
-        <button @click="saveData" :disabled="isSaving || !isValid"
+        <button @click="saveData" :disabled="!isValid"
                 class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-lg text-lg shadow-md transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">
-          {{ isSaving ? 'Saving...' : '💾 Save Recipe to Database' }}
+          💾 Save Recipe to Database
         </button>
       </div>
     </div>
@@ -304,7 +321,8 @@
       return {
         loadingHelperData: !window.__HELPER_DATA__,
         helperDataError: '',
-        isSaving: false,
+        toasts: [],
+        nextToastId: 1,
         showBulk: false,
         bulkText: '',
         hasInteracted: false,
@@ -424,6 +442,7 @@
         // so this round trip never has to happen on the common path.
         this.loadHelperData();
       }
+      this.watchViewportResize();
     },
     methods: {
       applyHelperData(data) {
@@ -441,6 +460,29 @@
             this.loadingHelperData = false;
           })
           .getHelperData();
+      },
+      // Dialogs opened via showModalDialog() get a fixed pixel size at open time
+      // (Code.gs's .setWidth(1100).setHeight(800), clamped to whatever the browser
+      // window was when it opened) - Apps Script never re-sizes an already-open
+      // dialog on its own, which is why resizing the browser window mid-session
+      // used to leave the dialog stuck at its original size until reopened.
+      // google.script.host.setWidth/setHeight can resize it from in here, so this
+      // listens for the window resizing and asks the dialog to reflow to match,
+      // clamped between a sane minimum and the original max size.
+      watchViewportResize() {
+        if (!(window.google && google.script && google.script.host)) return;
+        const MAX_W = 1100, MAX_H = 800, MIN_W = 360, MIN_H = 420, MARGIN = 40;
+        let resizeTimer = null;
+        const reflow = () => {
+          const width = Math.max(MIN_W, Math.min(MAX_W, window.innerWidth - MARGIN));
+          const height = Math.max(MIN_H, Math.min(MAX_H, window.innerHeight - MARGIN));
+          google.script.host.setWidth(width);
+          google.script.host.setHeight(height);
+        };
+        window.addEventListener('resize', () => {
+          clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(reflow, 150);
+        });
       },
       getCategory(uom) {
         for (let cat in this.uomData) { if (this.uomData[cat].includes(uom)) return cat; }
@@ -559,6 +601,10 @@
         this.showBulk = false;
         this.hasInteracted = true;
       },
+      // Client-side validation gates the save, same as before. But once valid, the
+      // form is handed to the background save and reset immediately instead of
+      // waiting on the round trip - the user can start the next recipe right away,
+      // and a toast reports the background result when it lands.
       saveData() {
         // form{} doesn't cover every validated field - 'ingredients' lives outside
         // it, and the equivalency errors are keyed by category name, not by the
@@ -568,10 +614,6 @@
         ['ingredients', 'weightEquivalency', 'volumeEquivalency', 'eachEquivalency'].forEach(k => this.touch(k));
         this.hasInteracted = true;
         if (!this.isValid) return;
-
-        this.isSaving = true;
-        this.serverMessage = '';
-        this.serverErrors = {};
 
         const payload = {
           name: this.form.name.trim(),
@@ -591,23 +633,73 @@
           ingredients: this.meaningfulIngredients.map(i => ({ name: i.name.trim(), qty: i.qty, uom: i.uom })),
           instructions: this.meaningfulInstructions.map(s => ({ text: s.text.trim() }))
         };
+        const recipeName = payload.name;
+        this.resetForm();
+
+        const toastId = this.pushToast({ type: 'info', message: 'Saving "' + recipeName + '"…', sticky: true });
 
         google.script.run
           .withSuccessHandler((res) => {
-            this.isSaving = false;
             if (res && res.ok) {
-              alert('Recipe Saved Successfully!');
-              this.resetForm();
+              this.updateToast(toastId, { type: 'success', message: '✅ "' + recipeName + '" saved.', sticky: false });
             } else {
-              this.serverErrors = (res && res.errors) || {};
-              this.serverMessage = (res && res.message) || 'Could not save the recipe.';
+              const message = (res && res.message) || 'Could not save the recipe.';
+              this.updateToast(toastId, {
+                type: 'error',
+                message: '⚠️ "' + recipeName + '" failed to save: ' + message,
+                sticky: true,
+                payload: payload
+              });
             }
           })
           .withFailureHandler((error) => {
-            this.isSaving = false;
-            this.serverMessage = 'Error saving recipe: ' + error.message;
+            this.updateToast(toastId, {
+              type: 'error',
+              message: '⚠️ "' + recipeName + '" failed to save: ' + error.message,
+              sticky: true,
+              payload: payload
+            });
           })
           .saveRecipeFromWeb(payload);
+      },
+      // Adds a toast and returns its id. Non-sticky toasts (info/success) auto-dismiss;
+      // sticky ones (a save still in flight, or a failure the user needs to act on)
+      // stay until dismissed or replaced via updateToast().
+      pushToast(toast) {
+        const id = this.nextToastId++;
+        this.toasts.push(Object.assign({ id }, toast));
+        if (!toast.sticky) this.scheduleAutoDismiss(id);
+        return id;
+      },
+      updateToast(id, changes) {
+        const toast = this.toasts.find(t => t.id === id);
+        if (!toast) { this.pushToast(changes); return; }
+        Object.assign(toast, changes);
+        if (!changes.sticky) this.scheduleAutoDismiss(id);
+      },
+      scheduleAutoDismiss(id) {
+        setTimeout(() => this.dismissToast(id), 4000);
+      },
+      dismissToast(id) {
+        this.toasts = this.toasts.filter(t => t.id !== id);
+      },
+      // Reloads a failed background save's payload back into the (now-empty) form so
+      // nothing the user entered is lost - the save was optimistic, not the data.
+      restoreToast(toast) {
+        const p = toast.payload;
+        Object.assign(this.form, {
+          name: p.name, measureType: p.measureType, yieldQty: p.yieldQty, yieldUom: p.yieldUom,
+          portionSize: p.portionSize, portionUom: p.portionUom,
+          inventoryYesNo: p.inventoryYesNo, inventoryUom: p.inventoryUom,
+          weightQty: p.weightQty, weightUom: p.weightUom,
+          volumeQty: p.volumeQty, volumeUom: p.volumeUom,
+          eachQty: p.eachQty, eachUom: p.eachUom
+        });
+        this.ingredients = p.ingredients.length ? p.ingredients.map(i => Object.assign({}, i)) : [{ name: '', qty: '', uom: '' }];
+        this.instructions = p.instructions.length
+          ? p.instructions.map(s => ({ text: s.text, uid: this.nextInstructionUid++ }))
+          : [{ text: '', uid: this.nextInstructionUid++ }];
+        this.dismissToast(toast.id);
       },
       resetForm() {
         Object.keys(this.form).forEach(k => { this.form[k] = ''; });

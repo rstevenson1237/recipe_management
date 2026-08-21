@@ -15,6 +15,12 @@ var HELPER_SHEET_NAME = 'Helper Data';
 var DASHBOARD_SHEET_NAME = 'Dashboard';
 var MAX_RECIPES_PER_SET = 25;
 
+// Helper Data changes rarely (it's an owner-maintained allowed-values list), so it's
+// safe to cache it for a long stretch rather than re-reading the sheet on every dialog
+// open. CacheService's document cache caps TTL at 6 hours - that's the longest we can ask for.
+var HELPER_DATA_CACHE_KEY = 'helperData_v1';
+var HELPER_DATA_CACHE_TTL_SECONDS = 21600;
+
 var HEADER_COLUMNS = [
   'Name', 'Measure Type', 'Reporting U of M', 'Yield Qty', 'Yield U of M',
   'Weight Qty', 'Weight U of M', 'Volume Qty', 'Volume U of M',
@@ -262,6 +268,41 @@ function getHelperData() {
   });
 
   return result;
+}
+
+/**
+ * Reads Helper Data through the document cache instead of the sheet directly, so
+ * the entry dialog isn't waiting on a Sheets read at the moment the user opens it.
+ * Falls back to a fresh sheet read (and re-warms the cache) on a cache miss - e.g.
+ * the cache expired, or this is the first call in a session that never went through
+ * onOpen (a dialog launched from a Drawing button still fires onOpen first, since
+ * that requires the sheet to already be open).
+ * @return {HelperData}
+ */
+function getHelperDataCached_() {
+  var cache = CacheService.getDocumentCache();
+  var cached = cache.get(HELPER_DATA_CACHE_KEY);
+  if (cached) {
+    try {
+      return /** @type {HelperData} */ (JSON.parse(cached));
+    } catch (parseError) {
+      // Corrupt cache entry - fall through to a fresh read below.
+    }
+  }
+  return warmHelperDataCache_();
+}
+
+/**
+ * Reads Helper Data fresh from the sheet and (re)populates the document cache with
+ * it. Called from onOpen() to warm the cache while the user is looking at the
+ * spreadsheet, well before they open the entry dialog, and as the fallback path in
+ * getHelperDataCached_() on a cache miss.
+ * @return {HelperData}
+ */
+function warmHelperDataCache_() {
+  var data = getHelperData();
+  CacheService.getDocumentCache().put(HELPER_DATA_CACHE_KEY, JSON.stringify(data), HELPER_DATA_CACHE_TTL_SECONDS);
+  return data;
 }
 
 /**
