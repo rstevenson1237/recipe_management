@@ -104,6 +104,177 @@ function saveRecipeFromWeb(payload) {
 }
 
 /**
+ * Loads one recipe's full data for the "Edit Existing Recipe" dropdown: the same
+ * form-shape fields Index.html's saveData() sends, plus its ingredients and
+ * instructions in saved order. Throws if the name can't be found (the dropdown
+ * only ever offers names read moments earlier, but the sheet could change in
+ * between - e.g. someone else deletes or renames it - so this is a real
+ * possibility, not defensive filler).
+ * @param {string} name
+ * @return {*}
+ */
+function getRecipeForEdit(name) {
+  var location = findRecipeLocation_(name);
+  if (!location) {
+    throw new Error('Recipe "' + name + '" was not found - it may have been renamed or deleted. Reopen the dialog and try again.');
+  }
+
+  var set = location.set;
+  var headerRow = set.headers.getRange(location.headerRow, 1, 1, HEADER_COLUMNS.length).getValues()[0];
+  var normalized = String(headerRow[0]).trim().toLowerCase();
+
+  var ingredients = getDataRows_(set.ingredients, INGREDIENT_COLUMNS.length)
+      .filter(function(r) { return String(r[0]).trim().toLowerCase() === normalized; })
+      .sort(function(a, b) { return Number(a[4]) - Number(b[4]); })
+      .map(function(r) { return { name: r[1], qty: r[2], uom: r[3] }; });
+
+  var instructions = getDataRows_(set.instructions, INSTRUCTION_COLUMNS.length)
+      .filter(function(r) { return String(r[0]).trim().toLowerCase() === normalized; })
+      .sort(function(a, b) { return Number(a[1]) - Number(b[1]); })
+      .map(function(r) { return { text: r[2] }; });
+
+  return {
+    originalName: String(headerRow[0]).trim(),
+    name: String(headerRow[0]).trim(),
+    measureType: headerRow[1],
+    yieldQty: headerRow[3],
+    yieldUom: headerRow[4],
+    weightQty: headerRow[5],
+    weightUom: headerRow[6],
+    volumeQty: headerRow[7],
+    volumeUom: headerRow[8],
+    eachQty: headerRow[9],
+    eachUom: headerRow[10],
+    portionSize: headerRow[11],
+    portionUom: headerRow[12],
+    inventoryYesNo: headerRow[13],
+    inventoryUom: headerRow[14],
+    ingredients: ingredients,
+    instructions: instructions
+  };
+}
+
+/**
+ * Receives the payload built by Index.html's saveData() while editing an existing
+ * recipe, and overwrites that recipe's Headers row plus its Ingredients/Instructions
+ * rows in place - a recipe never moves to a different sheet set on edit, only its
+ * own set's rows are touched. Returns the same { ok, errors, message } shape as
+ * saveRecipeFromWeb.
+ * @param {string} originalName - the recipe's name before this edit; used to find
+ *     its existing rows and excluded from the uniqueness check.
+ * @param {*} payload - JSON payload built by Index.html's saveData(); shape isn't
+ *     trusted (that's what validateRecipePayload_ is for), so it's typed loosely.
+ */
+function updateRecipeFromWeb(originalName, payload) {
+  var lock = LockService.getDocumentLock();
+  lock.waitLock(30000);
+
+  try {
+    var helperData = getHelperData();
+    var errors = validateRecipePayload_(payload, helperData);
+    if (Object.keys(errors).length > 0) {
+      return { ok: false, errors: errors, message: 'Please fix the highlighted fields.' };
+    }
+
+    var name = String(payload.name).trim();
+    if (recipeNameExists_(name, originalName)) {
+      return {
+        ok: false,
+        errors: { name: 'A recipe named "' + name + '" already exists.' },
+        message: 'Recipe name must be unique.'
+      };
+    }
+
+    var location = findRecipeLocation_(originalName);
+    if (!location) {
+      return {
+        ok: false,
+        errors: {},
+        message: 'Recipe "' + originalName + '" was not found - it may have been renamed or deleted elsewhere. Reopen the dialog and try again.'
+      };
+    }
+
+    var set = location.set;
+
+    set.headers.getRange(location.headerRow, 1, 1, HEADER_COLUMNS.length).setValues([[
+      name,
+      payload.measureType,
+      payload.yieldUom, // Reporting U of M always mirrors Yield U of M - not prompted for separately.
+      payload.yieldQty,
+      payload.yieldUom,
+      payload.weightQty || '',
+      payload.weightUom || '',
+      payload.volumeQty || '',
+      payload.volumeUom || '',
+      payload.eachQty || '',
+      payload.eachUom || '',
+      payload.portionSize || '',
+      payload.portionUom || '',
+      payload.inventoryYesNo,
+      payload.inventoryUom || ''
+    ]]);
+
+    var cleanIngredients = payload.ingredients.filter(function(/** @type {*} */ ing) {
+      return ing.name && String(ing.name).trim() !== '';
+    });
+    var ingredientRows = cleanIngredients.map(function(/** @type {*} */ ing, /** @type {number} */ index) {
+      return [name, String(ing.name).trim(), ing.qty, ing.uom, index + 1];
+    });
+    replaceRowsForRecipe_(set.ingredients, originalName, ingredientRows);
+
+    var cleanSteps = payload.instructions.filter(function(/** @type {*} */ step) {
+      return step.text && String(step.text).trim() !== '';
+    });
+    var instructionRows = cleanSteps.map(function(/** @type {*} */ step, /** @type {number} */ index) {
+      return [name, index + 1, String(step.text).trim()];
+    });
+    replaceRowsForRecipe_(set.instructions, originalName, instructionRows);
+
+    updateDashboardRow_(originalName, set.key, {
+      name: name,
+      measureType: payload.measureType,
+      yieldQty: payload.yieldQty,
+      yieldUom: payload.yieldUom,
+      portionSize: payload.portionSize,
+      portionUom: payload.portionUom,
+      ingredientCount: cleanIngredients.length,
+      stepCount: cleanSteps.length,
+      sourceKey: set.key
+    });
+
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Removes every existing row for a recipe name from an Ingredients/Instructions
+ * sheet, then appends newRows in their place - the delete-then-append used to
+ * rewrite a recipe's rows on edit, since the new row count rarely matches the old
+ * one. Deletion walks bottom-to-top so earlier deletes never shift the row numbers
+ * of matches still pending.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {string} name
+ * @param {Array<Array<*>>} newRows
+ */
+function replaceRowsForRecipe_(sheet, name, newRows) {
+  var normalized = String(name).trim().toLowerCase();
+  var lastRow = sheet.getLastRow();
+
+  if (lastRow >= 2) {
+    var names = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = names.length - 1; i >= 0; i--) {
+      if (String(names[i][0]).trim().toLowerCase() === normalized) {
+        sheet.deleteRow(2 + i);
+      }
+    }
+  }
+
+  appendRows_(sheet, newRows);
+}
+
+/**
  * Appends every row in a single batched write instead of one appendRow() call per
  * row - each appendRow() is its own round trip to the Sheets service, so this
  * turns an O(rows) sequence of calls into one for the multi-row ingredient and
