@@ -32,6 +32,7 @@ function openRecipeApp() {
   // interactive the instant the modal renders, with no extra client-server round trip.
   var template = HtmlService.createTemplateFromFile('Index');
   template.helperDataJson = JSON.stringify(getHelperData()).replace(/</g, '\\u003c');
+  template.recipeNamesJson = JSON.stringify(getRecipeNameList()).replace(/</g, '\\u003c');
 
   var html = template.evaluate()
       .setWidth(1100)
@@ -234,6 +235,38 @@ function nextDashboardRow_(dashboard, startRow) {
     if (nameColumn[i][0] === '' || nameColumn[i][0] === null) return startRow + i;
   }
   return startRow + nameColumn.length;
+}
+
+/**
+ * Updates an existing Dashboard row in place for a recipe that was just edited via
+ * updateRecipeFromWeb() - matched by its pre-edit name and source sheet-set key
+ * (the name itself may have just changed, so it can't be part of the match). Falls
+ * back to appending a new row if no matching row is found, e.g. the Dashboard was
+ * rebuilt or hand-edited since the recipe was saved.
+ * @param {string} oldName
+ * @param {string} sourceKey
+ * @param {DashboardRowEntry} entry
+ */
+function updateDashboardRow_(oldName, sourceKey, entry) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var dashboard = ss.getSheetByName(DASHBOARD_SHEET_NAME);
+  if (!dashboard) return;
+
+  var startRow = findDashboardHeaderRow_(dashboard) + 1;
+  var lastRow = dashboard.getLastRow();
+
+  if (lastRow >= startRow) {
+    var normalizedOldName = String(oldName).trim().toLowerCase();
+    var rows = dashboard.getRange(startRow, 1, lastRow - startRow + 1, DASHBOARD_TABLE_COLUMNS.length).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][0]).trim().toLowerCase() === normalizedOldName && String(rows[i][7]) === sourceKey) {
+        dashboard.getRange(startRow + i, 1, 1, DASHBOARD_TABLE_COLUMNS.length).setValues([buildDashboardRow_(entry)]);
+        return;
+      }
+    }
+  }
+
+  appendDashboardRow_(entry);
 }
 
 /**

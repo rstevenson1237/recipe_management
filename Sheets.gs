@@ -175,10 +175,14 @@ function getDataRows_(sheet, columnCount) {
  * date-keyed sets. Comparison is case-insensitive and trims whitespace, since
  * Name is the join key across all three DB sheets and must be unique.
  * @param {string} name
+ * @param {string=} excludeName - when editing a recipe, its own (pre-edit) name -
+ *     so renaming a recipe to itself, or leaving the name unchanged, never
+ *     reports a collision with itself.
  * @return {boolean}
  */
-function recipeNameExists_(name) {
+function recipeNameExists_(name, excludeName) {
   var normalized = String(name).trim().toLowerCase();
+  var excludeNormalized = excludeName ? String(excludeName).trim().toLowerCase() : null;
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   return ss.getSheets().some(function(sheet) {
@@ -187,9 +191,62 @@ function recipeNameExists_(name) {
 
     var rows = getDataRows_(sheet, 1);
     return rows.some(function(row) {
-      return String(row[0]).trim().toLowerCase() === normalized;
+      var rowName = String(row[0]).trim().toLowerCase();
+      if (excludeNormalized && rowName === excludeNormalized) return false;
+      return rowName === normalized;
     });
   });
+}
+
+/**
+ * @typedef {Object} RecipeLocation
+ * @property {SheetSet} set
+ * @property {number} headerRow - the recipe's actual row number in set.headers.
+ */
+
+/**
+ * Finds which sheet set a recipe lives in and its Headers row number, by name
+ * (case-insensitive, trimmed) across every date-keyed set on file. Used by the
+ * edit flow to locate the rows to overwrite - a recipe's Ingredients and
+ * Instructions rows always live in this same sheet set as its Headers row.
+ * @param {string} name
+ * @return {?RecipeLocation}
+ */
+function findRecipeLocation_(name) {
+  var normalized = String(name).trim().toLowerCase();
+  var sets = listAllSheetSets_();
+
+  for (var i = 0; i < sets.length; i++) {
+    var rows = getDataRows_(sets[i].headers, 1);
+    for (var r = 0; r < rows.length; r++) {
+      if (String(rows[r][0]).trim().toLowerCase() === normalized) {
+        return { set: sets[i], headerRow: r + 2 }; // +1 for the header row, +1 for the 0-index
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Returns every recipe name across all sheet sets, sorted alphabetically - used to
+ * populate the "Edit Existing Recipe" dropdown. Only reads the Name column, so it's
+ * far cheaper than exportAllRecipes() when ingredients/instructions aren't needed.
+ * @return {string[]}
+ */
+function getRecipeNameList() {
+  var sets = listAllSheetSets_();
+  /** @type {string[]} */
+  var names = [];
+
+  sets.forEach(function(set) {
+    getDataRows_(set.headers, 1).forEach(function(row) {
+      var name = String(row[0]).trim();
+      if (name) names.push(name);
+    });
+  });
+
+  names.sort(function(a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
+  return names;
 }
 
 /**
