@@ -116,7 +116,23 @@ Import failed: ReferenceError: cleanPreparation_ is not defined
 
 means — `Import.gs` is present and current, but `Save.gs` in the project is an older copy from
 before that helper existed. The fix is to re-paste the stale file, not to change the import
-code. When a change spans several files (adding the `Preparation` column touched `Save.gs`,
+code.
+
+The same staleness shows up with a different wording when the stale file is a `.gs` and the
+current one is an `.html` dialog, because the browser — not the server — is what notices:
+
+```
+TypeError: google.script.run.withSuccessHandler(...).withFailureHandler(...).getRecipeForEdit is not a function
+```
+
+`google.script.run` only carries the server functions that exist in the project when the dialog
+loads, so a name missing from it is a missing `.gs` function, never a bug in `Index.html`. The
+error surfaces as an uncaught `TypeError` rather than through `withFailureHandler`, which only
+ever sees failures from a call that actually reached the server. Re-paste the `.gs` file that
+defines the name (`getRecipeForEdit` lives in `Save.gs`), then reopen the dialog — an already
+open dialog keeps the old function list.
+
+When a change spans several files (adding the `Preparation` column touched `Save.gs`,
 `Sheets.gs`, `Export.gs`, `Code.gs`, `Index.html` and `Export.html` at once), paste all of
 them, in any order, before running anything — and add any new file first, since a missing file
 fails the same silent way.
