@@ -3,7 +3,8 @@
   "private": true,
   "description": "Google Apps Script recipe management workbook. The .gs/.html files here are pasted into the Apps Script editor directly - nothing in this package.json is deployed.",
   "scripts": {
-    "check": "node scripts/typecheck.js"
+    "check": "node scripts/typecheck.js",
+    "test": "node scripts/test-import-parsers.js"
   },
   "devDependencies": {
     "@types/google-apps-script": "^1.0.83",

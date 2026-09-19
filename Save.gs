@@ -46,7 +46,7 @@ function saveRecipeFromWeb(payload) {
         return ing.name && String(ing.name).trim() !== '';
       });
       var ingredientRows = cleanIngredients.map(function(/** @type {*} */ ing, /** @type {number} */ index) {
-        return [name, String(ing.name).trim(), ing.qty, ing.uom, index + 1];
+        return [name, String(ing.name).trim(), ing.qty, ing.uom, index + 1, cleanPreparation_(ing.prep)];
       });
       appendRows_(set.ingredients, ingredientRows);
 
@@ -126,7 +126,7 @@ function getRecipeForEdit(name) {
   var ingredients = getDataRows_(set.ingredients, INGREDIENT_COLUMNS.length)
       .filter(function(r) { return String(r[0]).trim().toLowerCase() === normalized; })
       .sort(function(a, b) { return Number(a[4]) - Number(b[4]); })
-      .map(function(r) { return { name: r[1], qty: r[2], uom: r[3] }; });
+      .map(function(r) { return { name: r[1], qty: r[2], uom: r[3], prep: r[5] }; });
 
   var instructions = getDataRows_(set.instructions, INSTRUCTION_COLUMNS.length)
       .filter(function(r) { return String(r[0]).trim().toLowerCase() === normalized; })
@@ -218,7 +218,7 @@ function updateRecipeFromWeb(originalName, payload) {
       return ing.name && String(ing.name).trim() !== '';
     });
     var ingredientRows = cleanIngredients.map(function(/** @type {*} */ ing, /** @type {number} */ index) {
-      return [name, String(ing.name).trim(), ing.qty, ing.uom, index + 1];
+      return [name, String(ing.name).trim(), ing.qty, ing.uom, index + 1, cleanPreparation_(ing.prep)];
     });
     replaceRowsForRecipe_(set.ingredients, originalName, ingredientRows);
 
@@ -272,6 +272,21 @@ function replaceRowsForRecipe_(sheet, name, newRows) {
   }
 
   appendRows_(sheet, newRows);
+}
+
+var MAX_PREPARATION_LENGTH = 200;
+
+/**
+ * Normalizes an ingredient's free-text Preparation ("minced", "diced small", ...):
+ * trimmed and length-capped, never rejected. It's a note to whoever cooks the recipe
+ * rather than a validated field - there is no list of allowed preparations to check it
+ * against - so an over-long value is truncated instead of blocking the save.
+ * @param {*} value
+ * @return {string}
+ */
+function cleanPreparation_(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim().substring(0, MAX_PREPARATION_LENGTH);
 }
 
 /**

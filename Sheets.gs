@@ -22,7 +22,11 @@ var HEADER_COLUMNS = [
   'Available in Inventory', 'Inventory U of M'
 ];
 
-var INGREDIENT_COLUMNS = ['Name', 'Ingredient', 'Qty', 'U of M', 'Ingredient Order'];
+// 'Preparation' is appended last on purpose: every existing read indexes into these
+// rows by position (Ingredient Order is row[4] all over Save.gs/Export.gs), so a new
+// column is only safe at the end. repairSheetColumns_() backfills the header on
+// ingredient sheets created before it existed.
+var INGREDIENT_COLUMNS = ['Name', 'Ingredient', 'Qty', 'U of M', 'Ingredient Order', 'Preparation'];
 
 var INSTRUCTION_COLUMNS = ['Name', 'Step Order', 'Instruction Text'];
 
@@ -88,13 +92,41 @@ function ensureSheetSetComplete_(key) {
  */
 function getOrCreateDbSheet_(ss, name, columns) {
   var sheet = ss.getSheetByName(name);
-  if (sheet) return sheet;
+  if (sheet) {
+    repairSheetColumns_(sheet, columns);
+    return sheet;
+  }
 
   sheet = ss.insertSheet(name);
   sheet.getRange(1, 1, 1, columns.length).setValues([columns]).setFontWeight('bold');
   sheet.setFrozenRows(1);
   sheet.hideSheet();
   return sheet;
+}
+
+/**
+ * Brings an existing sheet's header row into line with the current schema: widens the
+ * sheet if it holds fewer columns than the schema needs, then rewrites any header cell
+ * that doesn't match. This is how a column added to one of the *_COLUMNS constants
+ * reaches sheets created before it existed (the 'Preparation' column added to
+ * INGREDIENT_COLUMNS after recipes were already on file) - there is no separate
+ * migration step to run, every getOrCreateDbSheet_ call is one.
+ *
+ * Only row 1 is ever touched. Existing data rows are left exactly as they were, so the
+ * new column simply reads back as '' for rows written before it existed.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {string[]} columns
+ */
+function repairSheetColumns_(sheet, columns) {
+  var maxColumns = sheet.getMaxColumns();
+  if (maxColumns < columns.length) {
+    sheet.insertColumnsAfter(maxColumns, columns.length - maxColumns);
+  }
+
+  var headerRange = sheet.getRange(1, 1, 1, columns.length);
+  var current = headerRange.getValues()[0];
+  var stale = columns.some(function(label, i) { return String(current[i]).trim() !== label; });
+  if (stale) headerRange.setValues([columns]).setFontWeight('bold');
 }
 
 /**
@@ -322,6 +354,69 @@ function getHelperData() {
 }
 
 /**
+ * Appends ingredient names and units of measure to Helper Data that aren't already
+ * listed there, and returns what was actually added. Used by the PDF import: a recipe
+ * exported from another workbook can reference items this workbook's owner never
+ * listed, and leaving them out would make every imported recipe fail validation the
+ * next time someone opened it in the entry dialog.
+ *
+ * Helper Data's four columns are independent single-column lists that merely share a
+ * sheet, so each one is filled from its own first free row rather than by appending
+ * whole rows - appending rows would push new Weight units far below the existing ones
+ * just because the Item Data column happens to be longer.
+ * @param {string[]} itemNames
+ * @param {{Weight: string[], Volume: string[], Each: string[]}} uomsByCategory
+ * @return {{items: string[], uoms: string[]}}
+ */
+function appendHelperDataItems_(itemNames, uomsByCategory) {
+  var sheet = ensureHelperDataSheet_();
+  var rows = getDataRows_(sheet, HELPER_COLUMNS.length);
+  /** @type {{items: string[], uoms: string[]}} */
+  var added = { items: [], uoms: [] };
+
+  var plans = [
+    { column: 1, label: 'Weight', values: (uomsByCategory && uomsByCategory.Weight) || [] },
+    { column: 2, label: 'Volume', values: (uomsByCategory && uomsByCategory.Volume) || [] },
+    { column: 3, label: 'Each', values: (uomsByCategory && uomsByCategory.Each) || [] },
+    { column: 4, label: 'Item Data', values: itemNames || [] }
+  ];
+
+  plans.forEach(function(plan) {
+    /** @type {Object<string, boolean>} */
+    var existing = {};
+    var firstFreeRow = 2;
+
+    rows.forEach(function(row, index) {
+      var value = String(row[plan.column - 1]).trim();
+      if (!value) return;
+      existing[value.toLowerCase()] = true;
+      firstFreeRow = index + 3; // one past this row: +2 for the header row, +1 for the 0-index
+    });
+
+    /** @type {string[]} */
+    var pending = [];
+    plan.values.forEach(function(/** @type {*} */ value) {
+      var clean = String(value).trim();
+      if (!clean || existing[clean.toLowerCase()]) return;
+      existing[clean.toLowerCase()] = true;
+      pending.push(clean);
+    });
+    if (pending.length === 0) return;
+
+    sheet.getRange(firstFreeRow, plan.column, pending.length, 1).setValues(pending.map(function(value) {
+      return [value];
+    }));
+
+    pending.forEach(function(value) {
+      if (plan.column === 4) added.items.push(value);
+      else added.uoms.push(value + ' (' + plan.label + ')');
+    });
+  });
+
+  return added;
+}
+
+/**
  * In-workbook self-test for the sheet-set rollover and lock-step invariants. Run
  * manually from the Apps Script editor (select runSelfTest > Run) after changing
  * anything in Sheets.gs or Save.gs.
@@ -365,7 +460,7 @@ function runSelfTest() {
     var set = trackSet(ensureSheetSetComplete_(firstKey));
     for (var i = 1; i <= MAX_RECIPES_PER_SET; i++) {
       set.headers.appendRow(['Test Recipe ' + i, 'Weight', 'GRM', 1, 'GRM', '', '', '', '', '', '', '', '', 'No', '']);
-      set.ingredients.appendRow(['Test Recipe ' + i, 'Flour', 1, 'GRM', 1]);
+      set.ingredients.appendRow(['Test Recipe ' + i, 'Flour', 1, 'GRM', 1, 'sifted']);
       set.instructions.appendRow(['Test Recipe ' + i, 1, 'Mix']);
     }
     assert(Math.max(set.headers.getLastRow() - 1, 0) === MAX_RECIPES_PER_SET,
@@ -380,7 +475,7 @@ function runSelfTest() {
     assert(ss.getSheetByName(INSTRUCTIONS_PREFIX + secondKey) !== null, 'second Instructions sheet exists');
 
     secondSet.headers.appendRow(['Test Recipe 27', 'Weight', 'GRM', 1, 'GRM', '', '', '', '', '', '', '', '', 'No', '']);
-    secondSet.ingredients.appendRow(['Test Recipe 27', 'Flour', 1, 'GRM', 1]);
+    secondSet.ingredients.appendRow(['Test Recipe 27', 'Flour', 1, 'GRM', 1, '']);
     secondSet.instructions.appendRow(['Test Recipe 27', 1, 'Mix']);
     assert(Math.max(secondSet.headers.getLastRow() - 1, 0) < MAX_RECIPES_PER_SET, 'second set is not yet full');
 
@@ -412,7 +507,7 @@ function runSelfTest() {
     };
 
     try {
-      rollbackSet.ingredients.appendRow(['Broken Recipe', 'Flour', 1, 'GRM', 1]);
+      rollbackSet.ingredients.appendRow(['Broken Recipe', 'Flour', 1, 'GRM', 1, '']);
       rollbackSet.instructions.appendRow(['Broken Recipe', 1, 'Mix']);
       throw new Error('simulated failure before the header row is written');
     } catch (writeError) {
@@ -424,6 +519,23 @@ function runSelfTest() {
     assert(rollbackSet.headers.getLastRow() === startCounts.headers, 'rollback restores Headers row count');
     assert(rollbackSet.ingredients.getLastRow() === startCounts.ingredients, 'rollback restores Ingredients row count');
     assert(rollbackSet.instructions.getLastRow() === startCounts.instructions, 'rollback restores Instructions row count');
+
+    // --- Schema repair: an ingredient sheet created before the Preparation column
+    // --- existed must gain its header (and keep its data) the next time it's opened ---
+    var legacyName = INGREDIENTS_PREFIX + testBaseKey + '-LEGACY';
+    var legacySheet = ss.insertSheet(legacyName);
+    createdSheetNames.push(legacyName);
+    legacySheet.getRange(1, 1, 1, 5).setValues([['Name', 'Ingredient', 'Qty', 'U of M', 'Ingredient Order']]);
+    legacySheet.appendRow(['Legacy Recipe', 'Flour', 1, 'GRM', 1]);
+    if (legacySheet.getMaxColumns() > 5) legacySheet.deleteColumns(6, legacySheet.getMaxColumns() - 5);
+    assert(legacySheet.getMaxColumns() === 5, 'legacy ingredient sheet starts with exactly 5 columns');
+
+    repairSheetColumns_(legacySheet, INGREDIENT_COLUMNS);
+    assert(legacySheet.getRange(1, INGREDIENT_COLUMNS.length).getValue() === 'Preparation',
+        'repair adds the Preparation header to a legacy ingredient sheet');
+    var legacyRow = legacySheet.getRange(2, 1, 1, INGREDIENT_COLUMNS.length).getValues()[0];
+    assert(String(legacyRow[1]) === 'Flour' && Number(legacyRow[4]) === 1 && String(legacyRow[5]) === '',
+        'repair leaves legacy ingredient data intact, with an empty Preparation');
 
     Logger.log('runSelfTest: ALL ASSERTIONS PASSED');
   } finally {

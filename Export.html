@@ -46,6 +46,15 @@
     .instructions-col li { padding: 6px 0; white-space: pre-wrap; }
 
     .logo { height: 32px; flex-shrink: 0; }
+
+    /* The machine-readable block the PDF import reads back (see buildRecipeDataBlock_).
+       Deliberately tiny and pale rather than hidden: display:none / visibility:hidden
+       text is dropped from the printed PDF, and an image wouldn't be extractable text.
+       word-break lets one long base64 string wrap instead of overflowing the page. */
+    .rm-data {
+      margin-top: 18px; font-family: "Courier New", monospace; font-size: 5px;
+      line-height: 1.3; color: #d7dee8; word-break: break-all; user-select: all;
+    }
     .page-footer { position: absolute; right: 32px; bottom: 16px; font-size: 11px; color: #64748b; }
 
     @media screen {
@@ -63,7 +72,7 @@
 <body>
 
 <div class="toolbar">
-  <span>Recipe Export Preview<? if (recipes.length) { ?> &mdash; <?= recipes.length ?> recipe(s)<? } ?></span>
+  <span>Recipe Export Preview (v<?= formatVersion ?>)<? if (recipes.length) { ?> &mdash; <?= recipes.length ?> recipe(s)<? } ?></span>
   <button onclick="window.print()">🖨️ Print / Save as PDF</button>
 </div>
 
@@ -99,7 +108,7 @@
             <? } ?>
             <? for (var ii = 0; ii < r.ingredients.length; ii++) { ?>
               <? var ing = r.ingredients[ii]; ?>
-              <li><?= ing.qty ?> <?= ing.uom ?> &mdash; <?= ing.name ?></li>
+              <li><?= ing.qty ?> <?= ing.uom ?> &mdash; <?= ing.prep ? ing.name + ', ' + ing.prep : ing.name ?></li>
             <? } ?>
           </ul>
         </div>
@@ -116,7 +125,9 @@
         </div>
       </div>
 
-      <div class="page-footer">Recipe <?= i + 1 ?> of <?= recipes.length ?></div>
+      <div class="rm-data"><?= buildRecipeDataBlock_(r) ?></div>
+
+      <div class="page-footer">Recipe <?= i + 1 ?> of <?= recipes.length ?> &middot; Export v<?= formatVersion ?></div>
     </div>
   <? } ?>
 <? } ?>
