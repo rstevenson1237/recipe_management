@@ -94,6 +94,33 @@ base64 -w0 AtlasLogo_black_60x24.png > Logo.html
 
 Keep `AtlasLogo_black_60x24.png` in the repo as the source of truth.
 
+## Pasting a change in: copy every file it touches
+
+The Apps Script project must hold all eleven deployed files, under these exact names:
+
+`Code.gs`, `Save.gs`, `Sheets.gs`, `Export.gs`, `Import.gs`, `Reset.gs`, and
+`Index.html`, `Export.html`, `Import.html`, `Logo.html`.
+
+Apps Script puts every `.gs` file into one shared global scope, so a function defined in one
+file is callable from all the others, and features here are deliberately split that way — the
+import path in `Import.gs` calls `cleanPreparation_()` from `Save.gs`, the sheet helpers from
+`Sheets.gs`, and so on. The cost of that is that a *partial* paste breaks at runtime rather
+than at paste time: the editor happily saves a file calling a function no other file defines,
+and the call only fails when someone clicks the thing that runs it.
+
+That is what
+
+```
+Import failed: ReferenceError: cleanPreparation_ is not defined
+```
+
+means — `Import.gs` is present and current, but `Save.gs` in the project is an older copy from
+before that helper existed. The fix is to re-paste the stale file, not to change the import
+code. When a change spans several files (adding the `Preparation` column touched `Save.gs`,
+`Sheets.gs`, `Export.gs`, `Code.gs`, `Index.html` and `Export.html` at once), paste all of
+them, in any order, before running anything — and add any new file first, since a missing file
+fails the same silent way.
+
 ## Checking changes before pasting them into Apps Script
 
 None of `package.json`, `tsconfig.json`, `.gitignore`, or `scripts/` deploy anywhere — the Apps
