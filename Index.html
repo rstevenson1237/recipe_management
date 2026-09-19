@@ -79,6 +79,10 @@
               <input type="text" v-model="form.name" @input="touch('name')" @blur="touch('name')"
                      class="w-full border-gray-300 rounded-md shadow-sm p-2 border" :class="{'field-error': fieldError('name')}">
               <p v-if="fieldError('name')" class="text-xs text-red-600 mt-1">{{ fieldError('name') }}</p>
+              <p v-if="isRenaming" class="text-xs text-blue-700 mt-1">
+                Renaming &ldquo;{{ originalRecipeName }}&rdquo; &rarr; &ldquo;{{ form.name.trim() }}&rdquo; on update.
+              </p>
+              <p v-else-if="originalRecipeName" class="text-xs text-gray-500 mt-1">Editing this name renames the recipe.</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1 tooltip-container" data-title="Select Weight, Volume or Each. This determines the yield constraints.">Measure Type ⓘ</label>
@@ -214,10 +218,10 @@
 
             <!-- Bulk Paste Tool -->
             <div v-if="showBulk" class="mb-6 bg-white p-4 border border-orange-300 rounded shadow-inner">
-              <label class="block text-sm font-medium text-gray-700 mb-2">Bulk Paste from Excel (Ingredient | Qty | UOM)</label>
+              <label class="block text-sm font-medium text-gray-700 mb-2">Bulk Paste from Excel (Ingredient | Qty | UOM | Preparation)</label>
               <textarea v-model="bulkText" rows="4" class="w-full border-gray-300 rounded-md shadow-sm p-2 border font-mono text-sm mb-2" placeholder="Paste your Excel grid here..."></textarea>
               <button @click="parseBulkData" class="bg-gray-800 text-white px-4 py-2 rounded hover:bg-gray-700">Parse Data</button>
-              <p class="text-xs text-gray-500 mt-2">Rows that don't match Helper Data will be added and flagged in red for you to fix.</p>
+              <p class="text-xs text-gray-500 mt-2">Preparation is the optional 4th column - paste three columns and it is simply left blank. Rows that don't match Helper Data will be added and flagged in red for you to fix.</p>
             </div>
 
             <datalist id="ingredient-items-list">
@@ -226,12 +230,13 @@
 
             <!-- Ingredient Rows -->
             <div class="overflow-x-auto">
-              <table class="w-full text-left bg-white border min-w-[500px]">
+              <table class="w-full text-left bg-white border min-w-[700px]">
                 <thead>
                   <tr class="bg-gray-100 border-b">
                     <th class="p-2 font-medium text-sm">Ingredient Name</th>
                     <th class="p-2 font-medium text-sm w-24">Qty</th>
                     <th class="p-2 font-medium text-sm w-40">U of M</th>
+                    <th class="p-2 font-medium text-sm w-48">Preparation <span class="font-normal text-gray-500">(optional)</span></th>
                     <th class="p-2 w-10"></th>
                   </tr>
                 </thead>
@@ -256,6 +261,10 @@
                         <optgroup label="Each"><option v-for="uom in uomData.Each" :key="uom">{{ uom }}</option></optgroup>
                       </select>
                       <p v-if="ingredientRowErrors[index].uom" class="text-xs text-red-600 mt-1">Select a U of M</p>
+                    </td>
+                    <td class="p-2">
+                      <input type="text" v-model="ing.prep" @input="hasInteracted = true" maxlength="200"
+                             placeholder="e.g. minced" class="w-full border p-1 rounded">
                     </td>
                     <td class="p-2 text-center">
                       <button @click="removeIngredient(index)" class="text-red-500 hover:text-red-700 font-bold">✕</button>
@@ -343,7 +352,7 @@
           weightQty: '', weightUom: '', volumeQty: '', volumeUom: '', eachQty: '', eachUom: ''
         },
         ingredients: [
-          { name: '', qty: '', uom: '' }
+          { name: '', qty: '', uom: '', prep: '' }
         ],
         instructions: [
           { text: '', uid: 1 }
@@ -429,7 +438,14 @@
 
         return e;
       },
-      isValid() { return Object.keys(this.errors).length === 0; }
+      isValid() { return Object.keys(this.errors).length === 0; },
+      // Renaming is allowed: updateRecipeFromWeb() re-keys the recipe's ingredient and
+      // instruction rows and its Dashboard row onto the new name. This only surfaces it,
+      // so it's obvious the field is editable while editing.
+      isRenaming() {
+        return !!this.originalRecipeName && !!this.form.name &&
+            this.form.name.trim() !== this.originalRecipeName;
+      }
     },
     watch: {
       'form.measureType'() { this.applyEquivDefaults(); },
@@ -567,8 +583,8 @@
         this.form.eachUom = recipe.eachUom || '';
 
         this.ingredients = (recipe.ingredients && recipe.ingredients.length)
-          ? recipe.ingredients.map((i) => ({ name: i.name || '', qty: i.qty, uom: i.uom || '' }))
-          : [{ name: '', qty: '', uom: '' }];
+          ? recipe.ingredients.map((i) => ({ name: i.name || '', qty: i.qty, uom: i.uom || '', prep: i.prep || '' }))
+          : [{ name: '', qty: '', uom: '', prep: '' }];
 
         this.instructions = (recipe.instructions && recipe.instructions.length)
           ? recipe.instructions.map((s) => ({ text: s.text || '', uid: this.nextInstructionUid++ }))
@@ -590,7 +606,7 @@
           .getRecipeNameList();
       },
       addIngredient() {
-        this.ingredients.push({ name: '', qty: '', uom: '' });
+        this.ingredients.push({ name: '', qty: '', uom: '', prep: '' });
       },
       removeIngredient(index) {
         this.ingredients.splice(index, 1);
@@ -642,7 +658,10 @@
             this.ingredients.push({
               name: cols[0] ? cols[0].trim() : '',
               qty: cols[1] ? cols[1].trim() : '',
-              uom: cols[2] ? cols[2].trim() : ''
+              uom: cols[2] ? cols[2].trim() : '',
+              // Preparation is optional on purpose: a three-column paste (the shape
+              // this tool shipped with) must keep working untouched.
+              prep: cols[3] ? cols[3].trim() : ''
             });
           }
         });
@@ -679,7 +698,7 @@
           volumeUom: this.form.volumeUom,
           eachQty: this.form.eachQty,
           eachUom: this.form.eachUom,
-          ingredients: this.meaningfulIngredients.map(i => ({ name: i.name.trim(), qty: i.qty, uom: i.uom })),
+          ingredients: this.meaningfulIngredients.map(i => ({ name: i.name.trim(), qty: i.qty, uom: i.uom, prep: (i.prep || '').trim() })),
           instructions: this.meaningfulInstructions.map(s => ({ text: s.text.trim() }))
         };
 
@@ -710,7 +729,7 @@
       resetForm() {
         Object.keys(this.form).forEach(k => { this.form[k] = ''; });
         this.form.inventoryYesNo = 'No';
-        this.ingredients = [{ name: '', qty: '', uom: '' }];
+        this.ingredients = [{ name: '', qty: '', uom: '', prep: '' }];
         this.instructions = [{ text: '', uid: this.nextInstructionUid++ }];
         this.touched = {};
         this.equivTouched = { Weight: false, Volume: false, Each: false };

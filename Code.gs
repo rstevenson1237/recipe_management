@@ -16,6 +16,9 @@ function onOpen() {
       .createMenu('Recipe Tools')
       .addItem('Open Recipe UI', 'openRecipeApp')
       .addItem('Export All Recipes (Print)', 'openExportPreview')
+      .addItem('Import Recipes from PDF...', 'openImportDialog')
+      .addItem('Setup / Repair Dashboard', 'setupWorkbook')
+      .addItem('Clear ALL Recipes...', 'resetAllRecipes')
       .addToUi();
 }
 
@@ -38,6 +41,31 @@ function openRecipeApp() {
       .setWidth(1100)
       .setHeight(800)
       .setTitle('Recipe Management Interface');
+
+  SpreadsheetApp.getUi().showModalDialog(html, ' ');
+}
+
+/**
+ * Shows the PDF import dialog. The PDF is read and parsed entirely in the browser
+ * (pdf.js, loaded from a CDN by Import.html) and only the parsed recipes are sent to
+ * importRecipesFromPdf() - so no Drive scope, advanced service or manifest is needed,
+ * and a large PDF can't spend the server's execution budget on text extraction.
+ *
+ * Helper Data is inlined the same way openRecipeApp() does it: the review step flags
+ * ingredients and units this workbook doesn't know about yet, which needs those lists
+ * on hand before the user picks a file.
+ */
+function openImportDialog() {
+  ensureWorkbookInitialized_();
+
+  var template = HtmlService.createTemplateFromFile('Import');
+  template.helperDataJson = JSON.stringify(getHelperData()).replace(/</g, '\\u003c');
+  template.recipeNamesJson = JSON.stringify(getRecipeNameList()).replace(/</g, '\\u003c');
+
+  var html = template.evaluate()
+      .setWidth(900)
+      .setHeight(700)
+      .setTitle('Import Recipes from PDF');
 
   SpreadsheetApp.getUi().showModalDialog(html, ' ');
 }
@@ -107,6 +135,7 @@ function renderDashboardLayout_(sheet) {
     '3. Ingredients and Instructions are checked against the "Helper Data" sheet - ask the workbook owner to add missing items there.',
     '4. Every recipe you save appears in the table below automatically.',
     '5. Use 🍔 Recipe Tools > Export All Recipes (Print) to generate a print-ready, two-column export of every recipe on file.',
+    '6. Use 🍔 Recipe Tools > Import Recipes from PDF... to load every recipe out of a PDF that export produced.',
     '',
     'One-time setup for the button at right (if it is not already there):',
     'Insert > Drawing, draw a "New Recipe" button, click Save and Close, then click the drawing once more, open its ⋮ menu,',
@@ -150,11 +179,8 @@ function refreshDashboard() {
   var dashboard = ss.getSheetByName(DASHBOARD_SHEET_NAME);
   if (!dashboard) return;
 
+  clearDashboardRows_(dashboard);
   var startRow = findDashboardHeaderRow_(dashboard) + 1;
-  var lastRow = dashboard.getLastRow();
-  if (lastRow >= startRow) {
-    dashboard.getRange(startRow, 1, lastRow - startRow + 1, DASHBOARD_TABLE_COLUMNS.length).clearContent();
-  }
 
   var recipes = exportAllRecipes();
   if (recipes.length === 0) return;
@@ -177,6 +203,20 @@ function refreshDashboard() {
 }
 
 /**
+ * Clears every recipe row from the Dashboard's table, leaving the title, instructions
+ * and table header untouched. Shared by the full refresh and by resetAllRecipes(), so
+ * "which rows belong to the table" is decided in exactly one place.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} dashboard
+ */
+function clearDashboardRows_(dashboard) {
+  var startRow = findDashboardHeaderRow_(dashboard) + 1;
+  var lastRow = dashboard.getLastRow();
+  if (lastRow >= startRow) {
+    dashboard.getRange(startRow, 1, lastRow - startRow + 1, DASHBOARD_TABLE_COLUMNS.length).clearContent();
+  }
+}
+
+/**
  * Appends a single recipe to the Dashboard's recipe table, in the next available
  * (first empty) row after the header - the fast path called after every save
  * instead of rebuilding the whole table. New recipes land in save order, not
@@ -191,6 +231,26 @@ function appendDashboardRow_(entry) {
   var startRow = findDashboardHeaderRow_(dashboard) + 1;
   var nextRow = nextDashboardRow_(dashboard, startRow);
   dashboard.getRange(nextRow, 1, 1, DASHBOARD_TABLE_COLUMNS.length).setValues([buildDashboardRow_(entry)]);
+}
+
+/**
+ * Appends many recipes to the Dashboard's recipe table in one batched write - the PDF
+ * import path, where calling appendDashboardRow_() per recipe would be one round trip
+ * to the Sheets service per recipe and could push a large import past the execution
+ * limit on its own. No-op for an empty list.
+ * @param {DashboardRowEntry[]} entries
+ */
+function appendDashboardRows_(entries) {
+  if (entries.length === 0) return;
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var dashboard = ss.getSheetByName(DASHBOARD_SHEET_NAME);
+  if (!dashboard) return;
+
+  var startRow = findDashboardHeaderRow_(dashboard) + 1;
+  var nextRow = nextDashboardRow_(dashboard, startRow);
+  dashboard.getRange(nextRow, 1, entries.length, DASHBOARD_TABLE_COLUMNS.length)
+      .setValues(entries.map(function(entry) { return buildDashboardRow_(entry); }));
 }
 
 /**

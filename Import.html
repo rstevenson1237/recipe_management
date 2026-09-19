@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>
+    // Inlined by Code.gs's openImportDialog(), same as the entry dialog: the review step
+    // needs the workbook's ingredient/U of M lists and existing recipe names on hand to
+    // flag what an imported PDF brings in that this workbook doesn't know about yet.
+    window.__HELPER_DATA__ = <?!= helperDataJson ?>;
+    window.__RECIPE_NAMES__ = <?!= recipeNamesJson ?>;
+  </script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; }
+  </style>
+</head>
+<body class="bg-gray-100">
+
+<div id="app" class="h-screen flex flex-col">
+  <div class="flex-1 overflow-y-auto p-4 sm:p-6">
+    <div class="max-w-5xl mx-auto bg-white rounded-xl shadow-lg p-4 sm:p-8">
+      <h1 class="text-2xl font-bold text-gray-800 mb-2 border-b pb-4">Import Recipes from PDF</h1>
+      <p class="text-sm text-gray-600 mb-6">
+        Choose a PDF produced by <strong>Export All Recipes (Print)</strong>. Every recipe it contains is
+        imported into one new batch - there is no 25-recipe limit on an import. PDFs from older versions
+        of this workbook are handled too: any field they don't carry (such as ingredient Preparation) is
+        simply left blank.
+      </p>
+
+      <!-- STEP 1: FILE -->
+      <div class="mb-6">
+        <div class="bg-blue-600 text-white px-4 py-2 rounded-t-lg font-bold">1. Choose the PDF</div>
+        <div class="border border-blue-600 p-4 rounded-b-lg bg-blue-50">
+          <input type="file" accept="application/pdf,.pdf" @change="onFileChosen" :disabled="isBusy"
+                 class="block w-full text-sm text-gray-700">
+          <p v-if="fileName" class="text-xs text-gray-600 mt-2">{{ fileName }}</p>
+          <p v-if="statusMessage" class="text-sm text-blue-800 mt-2">{{ statusMessage }}</p>
+          <p v-if="parseError" class="text-sm text-red-600 mt-2">{{ parseError }}</p>
+        </div>
+      </div>
+
+      <!-- STEP 2: REVIEW -->
+      <div v-if="parsed.length" class="mb-6">
+        <div class="flex justify-between items-center bg-orange-600 text-white px-4 py-2 rounded-t-lg font-bold">
+          <span>2. Review what was found</span>
+          <span class="text-xs font-normal">
+            Format read: {{ formatSummary }}
+          </span>
+        </div>
+        <div class="border border-orange-600 p-4 rounded-b-lg bg-orange-50">
+          <div class="flex items-center gap-4 mb-3 text-sm">
+            <button @click="selectAll(true)" class="text-blue-700 hover:underline">Select all importable</button>
+            <button @click="selectAll(false)" class="text-blue-700 hover:underline">Select none</button>
+            <span class="text-gray-600">{{ selectedCount }} of {{ parsed.length }} selected</span>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left bg-white border text-sm">
+              <thead>
+                <tr class="bg-gray-100 border-b">
+                  <th class="p-2 w-10"></th>
+                  <th class="p-2 font-medium">Recipe</th>
+                  <th class="p-2 font-medium w-20">Ingr.</th>
+                  <th class="p-2 font-medium w-20">Steps</th>
+                  <th class="p-2 font-medium w-28">Read via</th>
+                  <th class="p-2 font-medium">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, index) in parsed" :key="index" class="border-b align-top">
+                  <td class="p-2">
+                    <input type="checkbox" v-model="row.selected" :disabled="row.blocked">
+                  </td>
+                  <td class="p-2">
+                    <span :class="{'text-gray-400 line-through': row.blocked}">{{ row.recipe.name || '(no name found)' }}</span>
+                  </td>
+                  <td class="p-2">{{ row.recipe.ingredients.length }}</td>
+                  <td class="p-2">{{ row.recipe.steps.length }}</td>
+                  <td class="p-2 text-xs text-gray-600">{{ row.source }}</td>
+                  <td class="p-2 text-xs">
+                    <p v-for="(note, ni) in row.notes" :key="ni"
+                       :class="row.blocked ? 'text-red-600' : 'text-amber-700'">{{ note }}</p>
+                    <p v-if="!row.notes.length" class="text-green-700">Ready to import.</p>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="text-xs text-gray-600 mt-3">
+            Ingredients and units of measure this workbook doesn't list yet are added to Helper Data on
+            import, so the imported recipes open cleanly in the entry dialog afterwards.
+          </p>
+        </div>
+      </div>
+
+      <!-- STEP 3: RESULT -->
+      <div v-if="result" class="mb-2">
+        <div class="bg-green-600 text-white px-4 py-2 rounded-t-lg font-bold">3. Import complete</div>
+        <div class="border border-green-600 p-4 rounded-b-lg bg-green-50 text-sm">
+          <p class="font-medium">Imported {{ result.imported }} recipe(s)<span v-if="result.sheetKey"> into batch "{{ result.sheetKey }}"</span>.</p>
+          <div v-if="result.helperDataAdded && (result.helperDataAdded.items.length || result.helperDataAdded.uoms.length)" class="mt-2">
+            <p class="font-medium">Added to Helper Data:</p>
+            <p v-if="result.helperDataAdded.items.length" class="text-xs">Ingredients: {{ result.helperDataAdded.items.join(', ') }}</p>
+            <p v-if="result.helperDataAdded.uoms.length" class="text-xs">Units of measure: {{ result.helperDataAdded.uoms.join(', ') }}</p>
+          </div>
+          <div v-if="result.skipped && result.skipped.length" class="mt-2">
+            <p class="font-medium text-amber-800">Skipped {{ result.skipped.length }}:</p>
+            <p v-for="(s, si) in result.skipped" :key="si" class="text-xs text-amber-800">{{ s.name }} - {{ s.reason }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STICKY FOOTER -->
+  <div class="border-t bg-white p-4 sm:p-6 shadow-inner">
+    <div class="max-w-5xl mx-auto">
+      <div v-if="serverMessage" class="mb-3 bg-red-50 border border-red-300 rounded p-3 text-sm text-red-700">
+        {{ serverMessage }}
+      </div>
+      <button @click="runImport" :disabled="isBusy || selectedCount === 0"
+              class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-lg text-lg shadow-md transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">
+        {{ isImporting ? 'Importing...' : 'Import ' + selectedCount + ' Recipe(s)' }}
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // pdf.js runs its parsing in a web worker; the worker script has to be pointed at
+  // explicitly because the library is loaded from a CDN. If the cross-origin worker is
+  // refused, pdf.js falls back to parsing on the main thread by itself.
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  // Labels printed by Export.html's meta grid. Used both to find a field's value and to
+  // know where that value ends, since the grid cells arrive as separate text runs with no
+  // reliable ordering or separator of their own.
+  const META_LABELS = [
+    'Measure Type:', 'Yield:', 'Reporting U of M:', 'Portion:', 'In Inventory:', 'Inventory U of M:'
+  ];
+  const DATA_BLOCK_PATTERN = /RMDATA1\[([A-Za-z0-9+/=]+)\]/g;
+
+  const { createApp } = Vue
+
+  createApp({
+    data() {
+      return {
+        helperItems: ((window.__HELPER_DATA__ || {}).items || []).slice(),
+        helperUoms: flattenUoms(window.__HELPER_DATA__),
+        existingNames: (window.__RECIPE_NAMES__ || []).slice(),
+        fileName: '',
+        statusMessage: '',
+        parseError: '',
+        serverMessage: '',
+        isParsing: false,
+        isImporting: false,
+        parsed: [],
+        result: null
+      }
+    },
+    computed: {
+      isBusy() { return this.isParsing || this.isImporting; },
+      selectedCount() { return this.parsed.filter(r => r.selected && !r.blocked).length; },
+      formatSummary() {
+        if (!this.parsed.length) return '';
+        const sources = [...new Set(this.parsed.map(r => r.source))];
+        return sources.join(', ');
+      }
+    },
+    methods: {
+      onFileChosen(event) {
+        const file = event.target.files && event.target.files[0];
+        this.parsed = [];
+        this.result = null;
+        this.parseError = '';
+        this.serverMessage = '';
+        if (!file) { this.fileName = ''; return; }
+
+        this.fileName = file.name;
+        this.statusMessage = 'Reading the PDF...';
+        this.isParsing = true;
+
+        const reader = new FileReader();
+        reader.onerror = () => {
+          this.isParsing = false;
+          this.statusMessage = '';
+          this.parseError = 'The file could not be read.';
+        };
+        reader.onload = () => this.parsePdf(reader.result);
+        reader.readAsArrayBuffer(file);
+      },
+
+      async parsePdf(arrayBuffer) {
+        try {
+          if (!window.pdfjsLib) throw new Error('The PDF reader library could not be loaded - check your connection and reopen this dialog.');
+
+          const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+          const pages = [];
+          for (let p = 1; p <= pdf.numPages; p++) {
+            this.statusMessage = 'Reading page ' + p + ' of ' + pdf.numPages + '...';
+            const page = await pdf.getPage(p);
+            const content = await page.getTextContent();
+            pages.push(content.items
+              .filter((item) => item.str !== undefined)
+              .map((item) => ({
+                str: item.str,
+                x: item.transform[4],
+                y: item.transform[5],
+                height: Math.abs(item.transform[3]) || item.height || 0
+              })));
+          }
+
+          // The embedded data block is exact, so it always wins over re-reading the
+          // printed layout; the layout parser exists for PDFs printed before the block
+          // was added (export v1).
+          let rows = parseDataBlocks(pages);
+          if (!rows.length) rows = parsePrintedLayout(pages, this.helperItems, this.helperUoms);
+          if (!rows.length) {
+            throw new Error('No recipes could be found in this PDF. Is it an export from this workbook?');
+          }
+
+          this.parsed = this.review(rows);
+          this.statusMessage = 'Found ' + this.parsed.length + ' recipe(s) in ' + pdf.numPages + ' page(s).';
+        } catch (error) {
+          this.parseError = error && error.message ? error.message : String(error);
+          this.statusMessage = '';
+        } finally {
+          this.isParsing = false;
+        }
+      },
+
+      /** Adds the per-recipe warnings shown in the review table. */
+      review(rows) {
+        const taken = {};
+        this.existingNames.forEach((name) => { taken[name.trim().toLowerCase()] = 'workbook'; });
+
+        return rows.map((row) => {
+          const recipe = row.recipe;
+          const notes = [];
+          let blocked = false;
+
+          const key = (recipe.name || '').trim().toLowerCase();
+          if (!key) {
+            notes.push('No recipe name could be read - this one cannot be imported.');
+            blocked = true;
+          } else if (taken[key] === 'workbook') {
+            notes.push('A recipe with this name is already in the workbook - it will be skipped.');
+            blocked = true;
+          } else if (taken[key] === 'pdf') {
+            notes.push('This name appears more than once in the PDF - only the first copy is imported.');
+            blocked = true;
+          } else {
+            taken[key] = 'pdf';
+          }
+
+          if (!recipe.ingredients.length) notes.push('No ingredients were found for this recipe.');
+          if (!recipe.measureType) notes.push('Measure Type is missing - fill it in after importing.');
+          if (!recipe.yieldQty || !recipe.yieldUom) notes.push('Yield is incomplete - fill it in after importing.');
+          if (recipe.ingredients.some((i) => !i.qty || !i.uom)) {
+            notes.push('Some ingredients are missing a Qty or U of M.');
+          }
+
+          const unknownItems = recipe.ingredients
+            .map((i) => i.name)
+            .filter((name) => name && !this.helperItems.includes(name));
+          if (unknownItems.length) {
+            notes.push(unknownItems.length + ' ingredient(s) not in Helper Data yet - they will be added: ' +
+              [...new Set(unknownItems)].join(', '));
+          }
+
+          const unknownUoms = [...new Set(recipe.ingredients
+            .map((i) => i.uom)
+            .filter((uom) => uom && !this.helperUoms.includes(uom)))];
+          if (unknownUoms.length) {
+            notes.push('Unit(s) of measure not in Helper Data yet - they will be added: ' + unknownUoms.join(', '));
+          }
+
+          return { recipe: recipe, source: row.source, notes: notes, blocked: blocked, selected: !blocked };
+        });
+      },
+
+      selectAll(value) {
+        this.parsed.forEach((row) => { if (!row.blocked) row.selected = value; });
+      },
+
+      runImport() {
+        const payload = this.parsed
+          .filter((row) => row.selected && !row.blocked)
+          .map((row) => JSON.parse(JSON.stringify(row.recipe)));
+        if (!payload.length) return;
+
+        this.isImporting = true;
+        this.serverMessage = '';
+        this.result = null;
+
+        google.script.run
+          .withSuccessHandler((res) => {
+            this.isImporting = false;
+            this.result = res;
+            // Names that just landed in the workbook, so a second file picked without
+            // reopening the dialog flags them as duplicates too.
+            this.existingNames = this.existingNames.concat(payload.map((r) => r.name));
+            this.parsed = [];
+            this.statusMessage = '';
+            this.fileName = '';
+          })
+          .withFailureHandler((error) => {
+            this.isImporting = false;
+            this.serverMessage = 'Import failed: ' + (error && error.message ? error.message : error);
+          })
+          .importRecipesFromPdf(payload);
+      }
+    }
+  }).mount('#app')
+
+  // ---------------------------------------------------------------------------
+  // Parsing helpers (pure functions, kept out of the component for testability)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Exact path: decode every RMDATA1[...] block in the document. Whitespace is
+   * stripped first because one base64 string is wrapped over several printed lines
+   * and arrives as several text runs.
+   */
+  function parseDataBlocks(pages) {
+    const joined = pages.map((items) => items.map((i) => i.str).join('')).join('').replace(/\s+/g, '');
+    const rows = [];
+    let match;
+    DATA_BLOCK_PATTERN.lastIndex = 0;
+    while ((match = DATA_BLOCK_PATTERN.exec(joined)) !== null) {
+      try {
+        const data = JSON.parse(decodeBase64Utf8(match[1]));
+        rows.push({
+          recipe: {
+            name: str(data.n),
+            measureType: str(data.mt),
+            reportingUom: str(data.ru),
+            yieldQty: data.yq === undefined ? '' : data.yq,
+            yieldUom: str(data.yu),
+            weightQty: data.wq === undefined ? '' : data.wq,
+            weightUom: str(data.wu),
+            volumeQty: data.vq === undefined ? '' : data.vq,
+            volumeUom: str(data.vu),
+            eachQty: data.eq === undefined ? '' : data.eq,
+            eachUom: str(data.eu),
+            portionSize: data.ps === undefined ? '' : data.ps,
+            portionUom: str(data.pu),
+            inventoryYesNo: str(data.inv) === 'Yes' ? 'Yes' : 'No',
+            inventoryUom: str(data.iu),
+            ingredients: (data.ing || []).map((ing) => ({
+              name: str(ing[0]), qty: ing[1] === undefined ? '' : ing[1],
+              uom: str(ing[2]), prep: str(ing[3])
+            })),
+            steps: (data.st || []).map((s) => str(s))
+          },
+          source: 'data block (v' + (data.v || '?') + ')'
+        });
+      } catch (error) {
+        // A block mangled by the print (or by a PDF that was edited afterwards) is
+        // skipped rather than failing the whole file; the layout parser still covers
+        // the recipe if no block survives at all.
+      }
+    }
+    return rows;
+  }
+
+  /**
+   * Fallback path: rebuild each recipe from the printed page. Text runs are grouped
+   * into lines by their y position, then split into the ingredients / instructions
+   * columns by the x positions of those two headings.
+   */
+  function parsePrintedLayout(pages, helperItems, helperUoms) {
+    const rows = [];
+
+    pages.forEach((items) => {
+      // Headings are located from the raw text runs, not from grouped lines: the
+      // export prints "Ingredients" and "Instructions" side by side at the same
+      // height, so they share a line and only their x positions tell the columns
+      // apart. Grouping into lines has to happen per column for the same reason -
+      // an ingredient and an instruction step printed at the same height would
+      // otherwise be glued into one line.
+      const ingredientHeading = items.find((item) => /^\s*Ingredients\s*$/i.test(item.str));
+      const instructionHeading = items.find((item) => /^\s*Instructions\s*$/i.test(item.str));
+      const splitX = columnSplitX(ingredientHeading, instructionHeading);
+      const bodyTop = Math.min(
+        ingredientHeading ? ingredientHeading.y : Infinity,
+        instructionHeading ? instructionHeading.y : Infinity
+      );
+
+      const allLines = groupIntoLines(items);
+      if (!allLines.length) return;
+      const version = detectVersion(allLines);
+
+      const metaLines = bodyLines(items.filter((item) => item.y > bodyTop));
+      const metaText = metaLines.map((line) => line.text).join(' ');
+      const hasHeader = META_LABELS.some((label) => metaText.indexOf(label) !== -1);
+
+      const ingredientLines = bodyLines(items.filter((item) => item.y < bodyTop && item.x < splitX));
+      const instructionLines = bodyLines(items.filter((item) => item.y < bodyTop && item.x >= splitX));
+
+      const ingredients = ingredientLines
+        .map((line) => parseIngredientLine(line.text, version, helperItems))
+        .filter((ing) => ing && ing.name);
+      const steps = parseStepLines(instructionLines);
+
+      // A page with no meta labels isn't a new recipe - it's the overflow of the
+      // previous one (a recipe with a long instruction list can run onto a second
+      // page), so its columns are appended rather than starting a new entry.
+      if (!hasHeader && rows.length) {
+        const previous = rows[rows.length - 1].recipe;
+        previous.ingredients = previous.ingredients.concat(ingredients);
+        previous.steps = previous.steps.concat(steps);
+        return;
+      }
+      if (!hasHeader && !ingredients.length && !steps.length) return;
+
+      const yieldParts = splitQtyUom(metaValue(metaText, 'Yield:'), helperUoms);
+      const portionParts = splitQtyUom(metaValue(metaText, 'Portion:'), helperUoms);
+      const inventory = metaValue(metaText, 'In Inventory:');
+
+      rows.push({
+        recipe: {
+          name: recipeTitle(allLines, metaLines),
+          measureType: metaValue(metaText, 'Measure Type:'),
+          reportingUom: metaValue(metaText, 'Reporting U of M:'),
+          yieldQty: yieldParts.qty,
+          yieldUom: yieldParts.uom,
+          weightQty: '', weightUom: '',
+          volumeQty: '', volumeUom: '',
+          eachQty: '', eachUom: '',
+          portionSize: portionParts.qty,
+          portionUom: portionParts.uom,
+          inventoryYesNo: /^yes$/i.test(inventory) ? 'Yes' : 'No',
+          inventoryUom: metaValue(metaText, 'Inventory U of M:'),
+          ingredients: ingredients,
+          steps: steps
+        },
+        source: 'printed layout (v' + version + ')'
+      });
+    });
+
+    return rows;
+  }
+
+  function str(value) {
+    return value === null || value === undefined ? '' : String(value).trim();
+  }
+
+  function flattenUoms(helperData) {
+    const uom = (helperData || {}).uom || {};
+    return [].concat(uom.Weight || [], uom.Volume || [], uom.Each || []);
+  }
+
+  /** base64 -> string, UTF-8 safe (ingredient names can hold accents). */
+  function decodeBase64Utf8(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+
+  /**
+   * Groups a page's text runs into printed lines. pdf.js reports each run with its own
+   * baseline y, so runs are bucketed by y (within a couple of points, to tolerate
+   * rounding and superscript-ish offsets) and then ordered left to right.
+   */
+  function groupIntoLines(items) {
+    const buckets = [];
+
+    items.forEach((item) => {
+      if (!item.str || !item.str.trim()) return;
+      let bucket = buckets.find((b) => Math.abs(b.y - item.y) <= 2.5);
+      if (!bucket) {
+        bucket = { y: item.y, items: [] };
+        buckets.push(bucket);
+      }
+      bucket.items.push(item);
+    });
+
+    return buckets
+      .sort((a, b) => b.y - a.y) // top of the page first
+      .map((bucket) => {
+        const ordered = bucket.items.sort((a, b) => a.x - b.x);
+        return {
+          y: bucket.y,
+          x: ordered[0].x,
+          height: Math.max.apply(null, ordered.map((i) => i.height)),
+          text: ordered.map((i) => i.str).join(' ').replace(/\s+/g, ' ').trim()
+        };
+      })
+      .filter((line) => line.text !== '');
+  }
+
+  /**
+   * Printed lines of a set of text runs, with everything that isn't recipe content
+   * dropped: the page footer, the tiny machine-readable block (which is also excluded by
+   * height - nothing in the recipe body is printed that small), and the preview toolbar.
+   */
+  function bodyLines(items) {
+    return groupIntoLines(items).filter((line) => line.height >= 7 && !isNoiseLine(line.text));
+  }
+
+  /** The export's own footer, and the machine-readable block, are not recipe content. */
+  function isNoiseLine(text) {
+    return /^Recipe\s+\d+\s+of\s+\d+/i.test(text) ||
+      text.indexOf('RMDATA1') !== -1 ||
+      /^[A-Za-z0-9+/=]{30,}$/.test(text.replace(/\s+/g, '')) ||
+      /^Recipe Export Preview/i.test(text) ||
+      /^Print \/ Save as PDF$/i.test(text);
+  }
+
+  /**
+   * Export version stamped in the page footer ("Recipe 1 of 9 - Export v2"). Absent on
+   * PDFs printed before the stamp existed, which are v1 by definition. The version is
+   * what decides whether a comma in an ingredient line may be read as a Preparation.
+   */
+  function detectVersion(lines) {
+    for (const line of lines) {
+      const match = /Export\s+v(\d+)/i.exec(line.text);
+      if (match) return Number(match[1]);
+    }
+    return 1;
+  }
+
+  function columnSplitX(ingredientHeading, instructionHeading) {
+    if (ingredientHeading && instructionHeading) {
+      return (ingredientHeading.x + instructionHeading.x) / 2;
+    }
+    if (instructionHeading) return instructionHeading.x - 1;
+    if (ingredientHeading) return ingredientHeading.x + 200;
+    return Infinity; // no headings found: treat everything as the ingredients column
+  }
+
+  /**
+   * Value of one meta-grid field. The grid's label and value are separate text runs with
+   * nothing between them, so a value runs from just after its label to the start of the
+   * next label (or the end of the meta text).
+   */
+  function metaValue(metaText, label) {
+    const start = metaText.indexOf(label);
+    if (start === -1) return '';
+
+    const rest = metaText.slice(start + label.length);
+    let end = rest.length;
+    META_LABELS.forEach((other) => {
+      const at = rest.indexOf(other);
+      if (at !== -1 && at < end) end = at;
+    });
+    return rest.slice(0, end).trim();
+  }
+
+  /** The printed title is the tallest run on the page (the h2), above the meta grid. */
+  function recipeTitle(lines, metaLines) {
+    const labelled = metaLines.filter((line) => META_LABELS.some((l) => line.text.indexOf(l) !== -1));
+    const topOfMeta = labelled.length ? Math.max.apply(null, labelled.map((l) => l.y)) : -Infinity;
+
+    const candidates = lines.filter((line) => line.y > topOfMeta &&
+      !isNoiseLine(line.text) && !META_LABELS.some((l) => line.text.indexOf(l) !== -1));
+    if (!candidates.length) return '';
+
+    let best = candidates[0];
+    candidates.forEach((line) => { if (line.height > best.height) best = line; });
+    return best.text.trim();
+  }
+
+  /**
+   * "1 Tbsp - Chives, minced" -> {qty, uom, name, prep}. The em dash the export prints
+   * between the quantity and the name is the split point. What follows it is one comma
+   * separated "Name, Preparation" field on a v2 PDF, which has to be taken apart again
+   * without knowing which commas belong to which half: an ingredient name can contain one
+   * ("Salt, kosher") and so can a preparation ("softened, cubed").
+   *
+   * So Helper Data decides wherever it can - the longest prefix that is a known
+   * ingredient name wins - and only when nothing matches does the first comma split it,
+   * which is right for the common "Name, prep with, commas" shape. A v1 PDF has no
+   * Preparation to recover, so its commas are always part of the name.
+   */
+  function parseIngredientLine(text, version, helperItems) {
+    if (/^No ingredients on file/i.test(text)) return null;
+
+    const parts = text.split(/\s[\u2014\u2013]\s|\u2014|\u2013/);
+    if (parts.length < 2) {
+      // No dash at all: take the whole line as the ingredient name so nothing is lost.
+      return { name: text.trim(), qty: '', uom: '', prep: '' };
+    }
+
+    const measure = parts[0].trim();
+    const rest = parts.slice(1).join(' - ').trim();
+    const measureMatch = /^(\S+)\s*(.*)$/.exec(measure) || ['', '', ''];
+    const split = version >= 2 ? splitNameAndPrep(rest, helperItems) : { name: rest, prep: '' };
+
+    return { name: split.name, qty: measureMatch[1] || '', uom: (measureMatch[2] || '').trim(), prep: split.prep };
+  }
+
+  /**
+   * Splits a printed "Name, Preparation" field. Known ingredient names are preferred over
+   * comma position (longest match wins, so "Salt, kosher, cracked" keeps its name intact);
+   * otherwise the first comma is the boundary.
+   */
+  function splitNameAndPrep(text, helperItems) {
+    const known = (helperItems || []).map((item) => item.trim().toLowerCase());
+    if (known.includes(text.toLowerCase())) return { name: text, prep: '' };
+
+    let firstComma = -1;
+    let bestName = '';
+    let bestPrep = '';
+
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] !== ',') continue;
+      if (firstComma === -1) firstComma = i;
+
+      const candidate = text.slice(0, i).trim();
+      if (candidate && known.includes(candidate.toLowerCase()) && candidate.length > bestName.length) {
+        bestName = candidate;
+        bestPrep = text.slice(i + 1).trim();
+      }
+    }
+
+    if (bestName) return { name: bestName, prep: bestPrep };
+    if (firstComma > 0) return { name: text.slice(0, firstComma).trim(), prep: text.slice(firstComma + 1).trim() };
+    return { name: text, prep: '' };
+  }
+
+  /**
+   * Instruction column lines back into steps. The printed list is numbered, so a line
+   * starting "3." opens a new step and anything after it is a wrapped continuation of
+   * that step.
+   */
+  function parseStepLines(lines) {
+    const steps = [];
+
+    lines.forEach((line) => {
+      const text = line.text.trim();
+      if (!text || /^No instructions on file/i.test(text)) return;
+
+      const numbered = /^(\d+)[.)]\s*(.*)$/.exec(text);
+      // The placeholder is printed inside the numbered list, so it only shows up once the
+      // list marker has been stripped.
+      if (numbered && /^No instructions on file/i.test(numbered[2])) return;
+
+      if (numbered) {
+        steps.push(numbered[2].trim());
+      } else if (steps.length) {
+        steps[steps.length - 1] = (steps[steps.length - 1] + ' ' + text).trim();
+      } else {
+        steps.push(text);
+      }
+    });
+
+    return steps.filter((text) => text !== '');
+  }
+
+  /**
+   * "5 GRM" -> {qty: '5', uom: 'GRM'}. Where the remainder matches a known unit exactly
+   * that wins; otherwise the first token is taken as the quantity, which is what the
+   * export prints.
+   */
+  function splitQtyUom(value, helperUoms) {
+    const text = (value || '').trim();
+    if (!text) return { qty: '', uom: '' };
+
+    const match = /^([\d.,/]+)\s*(.*)$/.exec(text);
+    if (!match) return { qty: '', uom: text };
+
+    const uom = match[2].trim();
+    const exact = helperUoms.find((known) => known.toLowerCase() === uom.toLowerCase());
+    return { qty: match[1].replace(/,$/, ''), uom: exact || uom };
+  }
+</script>
+</body>
+</html>
